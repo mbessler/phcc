@@ -145,14 +145,14 @@ delaycounterdoa
 			outFIFO232first, outFIFO232last
 			recv_byte
 			recv_state
-			talk
+			talk, gie_flag, an_changed
 
 			keyinput_old, keyinput_new, keyinput_delta, col_addr
 			doa_devaddr, doa_subaddr, doa_data
 			dob_addr, dob_data
 			i2cout_addr, i2cout_subaddr, i2cout_data
 
-			tmp, tmp2, antmpH, antmpL
+			tmp, tmp2, antmp, antmpH, antmpL
 			counter, counter2, counterkmx, counteran, ledcounter
 			adr4067
 			adr154
@@ -339,7 +339,11 @@ end_interrupt:
 timer0_int:
 	BTG		PORTB, 7
 		CALL	keymatrix_in            ; read in one column of the keymatrix
-		CALL	analog_in
+		CALL   read_analog_pri1        ; read ANP1
+		CALL   read_analog_pri2        ; read ANP2
+		CALL   read_analog_pri3        ; read ANP3
+		CALL   read_analog_secA        ; read analog value of first 4067 
+		CALL   read_analog_secB        ; read analog value of second 4067 
 		CALL	inc_addr                        ; increment address to 4067 mux
 
 		MOVF    adr4067, W                      ; load adr4067 into W
@@ -430,7 +434,11 @@ inFIFOproc_done:
 ;;--------------------------------
 send2host:
 rs232_send:
-	BCF	INTCON, GIE				; disable interrupts
+		BSF		gie_flag, 0			; save GIE bit
+		BTFSS	INTCON, GIE			; to differentiate if we were called from inside an interrupt handler
+		BCF		gie_flag, 0
+		BCF	INTCON, GIE				; disable interrupts
+
 		MOVWF	tmpFIFO				; need to temporarily store byte
 		LFSR	FSR1, outFIFO232	; load base address for indirect adressing
 		MOVF	outFIFO232last, W	; last position
@@ -438,7 +446,10 @@ rs232_send:
 		MOVF	tmpFIFO, W			; get byte to send
 		MOVWF	INDF1				; put in buffer
 		INCF	outFIFO232last, F	; point to new (empty) position
-	BSF	INTCON, GIE				; re-enable interrupts
+
+		BTFSC	gie_flag, 0			; were we called from outside an interrupt handler ?
+		BSF	INTCON, GIE				; yes, then re-enable interrupts
+
 		RETURN
 
 ;;--------------------------------
@@ -547,7 +558,6 @@ hostcmd_jmptbl:
 		BRA		hostcmd_dobsend		; HOSTCMD_DOBSEND
 		RETURN
 		RETURN
-
 
 ;;;;;;;;;;;;;;;; hostcommands further handling
 hostcmd_starttalking:
@@ -965,14 +975,6 @@ keymatrix_checkchanges_end:
 
 
 ;;;;;;;;; ANALOG in ;;;;;;;;;;;;;;;;;;;;;
-analog_in:
-		RCALL   read_analog_pri1        ; read ANP1
-		RCALL   read_analog_pri2        ; read ANP2
-		RCALL   read_analog_pri3        ; read ANP3
-		RCALL   read_analog_secA        ; read analog value of first 4067 
-		RCALL   read_analog_secB        ; read analog value of second 4067 
-		RETURN
-
 
 read_analog_pri1:
 		LFSR	FSR2, analogin+(0*2)
@@ -986,10 +988,10 @@ read_analog_pri3:
 		LFSR	FSR2, analogin+(2*2)
 		MOVLW	b'00010000'			; ANP3 connected to RA2/AN2
 read_analog_pri
-		MOVWF	tmp					; store for preparation to ADCON0
+		MOVWF	antmp				; store for preparation to ADCON0
 		MOVLW	b'11000111'			; mask out ADCON0<CHS0:CHS2>
 		ANDWF	ADCON0, W			; AND it, leave result in W
-		IORWF	tmp, W				; now OR the stored mask with values set for CHS0:CHS2 and leave in W
+		IORWF	antmp, W			; now OR the stored mask with values set for CHS0:CHS2 and leave in W
 		MOVWF	ADCON0				; and store in ADCON0
 		
 		; wait some A/D aquisistion time after changing the channels
@@ -1000,34 +1002,48 @@ anp_adc_wait:
 		BTFSC	ADCON0, GO_DONE		; conversion is done when bit GO/!DONE is reset to zero by hardware
 		BRA		anp_adc_wait
 
+an_store:		
+		CLRF	an_changed			; clear analog-value-changed flag
 				;; store AD result, *high byte* ***first***
 		MOVF	ADRESH, W			; save analog result (high byte) to memory pointed to by FSR2 + 1
+		CPFSEQ	INDF2				; compare new value high byte in W with old value at INDF2
+		BSF		an_changed, 0		; if not equal, set bit 0 of an_changed
 		MOVWF	POSTINC2			; store high byte, postinc not necessary, just looks better
 		MOVF	ADRESL, W			; save analog result (low byte) to memory pointed to by FSR2
-		MOVWF	POSTINC2			; and then increment FSR2 for the high byte
+		CPFSEQ	INDF2				; compare new value low byte in W with old value at INDF2
+		BSF		an_changed, 1		; if not equal, set bit 1 of an_changed. if an_changed == 0x00 => no change
+		MOVWF	INDF2				; and then store the high byte at FSR2 
 
 		BTFSS	talk, 0				; is bit 0 of talk set ? (should we notify host of changed analog value?)
 		RETURN						; we return if talk bit<0> is not set
 
 an_send_host_update:
-	NOP;	MOVLW	b'01010000'
-	NOP;	RCALL	rs232_send			; and send to host
-	NOP;	MOVF	POSTDEC2, W			; get analog value low byte
-	NOP;	MOVWF	antmpL				; save in temp. var
-	NOP;	MOVF	POSTDEC2, W			; get analog value high byte
-	NOP;	MOVWF	antmpH
-	NOP;	MOVLW	b'00000011'			; mask for the D<9:8> in antmpH
-	NOP;	ANDWF	antmpH, F			; bitwise AND it
-	NOP;	; get offset in analogin[]
-	NOP;	MOVF	FSR2L, W
-	NOP;	; shift it two bits left
-	NOP;	RLNCF	WREG, W
-	NOP;	RLNCF	WREG, W
-	NOP;	ANDLW	b'11111100'			; mask out lower two bits, now we got A5-A0 in WREG<7:2>
-	NOP;	IORWF	antmpH, W			; combine A5-0 and D9-8 in WREG
-	NOP;	RCALL	rs232_send			; and send to host
-	NOP;	MOVF	antmpL,W 			; retrieve low byte of analog value
-	NOP;	RCALL	rs232_send			; and send to host
+		MOVLW	0x00				; do we need to send an update ?
+		CPFSEQ	an_changed			; if an_changed==0x00, then no change, don't have to send.
+		BRA		an_was_change
+		RETURN						; an_change was 0, no change, return
+an_was_change:
+		; there was a change, so we tell the host
+		MOVLW	b'01010000'
+		CALL	rs232_send			; and send to host
+		MOVF	POSTDEC2, W			; get analog value low byte
+		MOVWF	antmpL				; save in temp. var
+		MOVF	INDF2, W			; get analog value high byte
+		MOVWF	antmpH
+		MOVLW	b'00000011'			; mask for the D<9:8> in antmpH
+		ANDWF	antmpH, F			; bitwise AND it
+		; get offset in analogin[]
+		MOVF	FSR2L, W
+		; shift once right (divide by two) since each analog value takes up two bytes in memory
+		RRNCF	WREG, W
+		; shift it two bits left
+		RLNCF	WREG, W
+		RLNCF	WREG, W				
+		ANDLW	b'11111100'			; mask out lower two bits, now we got A5-A0 in WREG<7:2>
+		IORWF	antmpH, W			; combine A5-0 and D9-8 in WREG
+		CALL	rs232_send			; and send to host
+		MOVF	antmpL,W 			; retrieve low byte of analog value
+		CALL	rs232_send			; and send to host
 		RETURN
 
 
@@ -1056,10 +1072,10 @@ read_analog_secB:
 		MOVLW	b'00001000'			; 4067 #2 connected to RA1/AN1
 
 read_analog_sec:
-		MOVWF	tmp					; store for preparation to ADCON0
+		MOVWF	antmp				; store for preparation to ADCON0
 		MOVLW	b'11000111'			; mask out ADCON0<CHS0:CHS2>
 		ANDWF	ADCON0, W			; AND it, leave result in W
-		IORWF	tmp, W				; now OR the stored mask with values set for CHS0:CHS2 and leave in W
+		IORWF	antmp, W			; now OR the stored mask with values set for CHS0:CHS2 and leave in W
 		MOVWF	ADCON0				; and store in ADCON0
 		
 		; wait some A/D aquisistion time after changing the channels
@@ -1069,13 +1085,8 @@ read_analog_sec:
 ansec_adc_wait:
 		BTFSC	ADCON0, GO_DONE		; conversion is done when bit GO/!DONE is reset to zero by hardware
 		BRA		ansec_adc_wait
-				;; store AD result, *high byte* ***first***
-		MOVF	ADRESH, W			; save analog result (high byte) to memory pointed to by FSR0 + 1
-		MOVWF	POSTINC2			; store high byte, postinc not necessary, just looks better
-		MOVF	ADRESL, W			; save analog result (low byte) to memory pointed to by FSR0
-		MOVWF	POSTINC2			; and then increment FSR0 for the high byte
 
-		RETURN
+		BRA		an_store			; store analog value in memory
 
 
 
