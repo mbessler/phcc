@@ -15,7 +15,10 @@ PHCC on the web:
 The software and the hardware designs are available via the
 subversion repository at
   http://svn.varxec.net/
-  svn://svn.varxec.net/repos/trunk PHCC
+anonymous access:
+  svn checkout svn://svn.varxec.net/repos/trunk PHCC
+with username/password: 
+  svn --username <user> checkout svn+ssh://svn.varxec.net/repos/trunk PHCC
 
 
 Enjoy
