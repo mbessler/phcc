@@ -60,6 +60,7 @@
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
+#include <getopt.h>
 
 #include "ihexfile.h"
 
@@ -70,14 +71,14 @@
 #define TICKLE 0xFF
 
 int checksum = 0;
-int fd = 0;
-
-//void waitms(int ms)
-//{
-//	int i,j;
-//	for(i=0; i<ms*10000; i++)
-//			;
-//}
+//int fd = 0;
+int speed=B19200;
+int flags=CS8;
+char dev[64];
+int bytes = -1;
+int startaddr = -1;
+char hexfile[64];
+int rows;
 
 void waitms(int ms)
 {
@@ -267,7 +268,7 @@ void setline(int fd, int flags, int speed)
 	tcsetattr(fd, TCSANOW, &t);
 }
 
-void usage(argv0)
+void usage(char * argv0)
 {
 	printf("To read from flash Memory: \n");
 	printf("\tusage: %s --readflash --bytes <n> --startaddr <x>\n", argv0);
@@ -297,33 +298,23 @@ void usage(argv0)
 
 
 	
-	close(fd);
 	exit(-1);
 }
 
 
-void main_readeeprom(int argc, char **argv)
+void main_readeeprom(int fd)
 {
 	int i;
-	int bytes, startaddr, adr = 0;
+	int adr = 0;
 	unsigned char b;
 	int maxsize = 256; // bytes of EEPROM the device has
 
-	if( argc != 6 )
-		usage(argv[0]);
-
-	if( strcmp(argv[2], "--bytes") != 0 )
-		usage(argv[0]);
-	if( strcmp(argv[4], "--startaddr") != 0 )
-		usage(argv[0]);
-	if( atoi(argv[3]) == 0 )
-		usage(argv[0]); 
-	else
-		bytes = atoi(argv[3]);
-
-	if( sscanf(argv[5], "0x%x", &startaddr)==0 )
-		usage(argv[0]);
-	
+	if( bytes <= 0 || startaddr < 0 )
+	{
+		printf("ERROR: you need to specify both --bytes and --startaddr\n");
+		exit(-1);
+	}
+		
 	if( startaddr > maxsize-1 )
 	{
 		printf("[ERROR, address out of range. Device EEPROM address range is 0-%i]\n", maxsize-1);
@@ -427,29 +418,20 @@ void writeflash(int fd, unsigned int * membuffer, int startaddress, int words)
 	printf("[OK => Acknowledged Write Flash Program Memory]\n");
 }
 
-void main_readflash(int argc, char **argv)
+void main_readflash(int fd)
 {
 	unsigned char b;
-	int bytes = 0;
-	long int startaddr = 0, adr;
+	long adr;
 	unsigned int membuffer[65536];
 
 	memset(membuffer, 0, 65536);
 
-	if( argc != 6 )
-		usage(argv[0]);
-
-	if( strcmp(argv[2], "--bytes") != 0 )
-		usage(argv[0]);
-	if( strcmp(argv[4], "--startaddr") != 0 )
-		usage(argv[0]);
-	if( atoi(argv[3]) == 0 || atoi(argv[3]) > 251 )
-		usage(argv[0]); 
-	else
-		bytes = atoi(argv[3]);
-
-	if( sscanf(argv[5], "0x%x", &startaddr)==0 )
-		usage(argv[0]);
+	
+	if( bytes <= 0 || startaddr < 0 )
+	{
+		printf("ERROR: you need to specify both --bytes and --startaddr\n");
+		exit(-1);
+	}
 
 	printf("SENDing: Read Flash: ");
 	sendSTX(fd); 
@@ -506,7 +488,7 @@ void main_readflash(int argc, char **argv)
 	}
 }
 
-void eraseflash(long int startaddr, int rows)
+void eraseflash(int fd, long int startaddr, int rows)
 {
 	unsigned char b;
 	printf("SENDing Erase Flash: ");
@@ -536,63 +518,48 @@ void eraseflash(long int startaddr, int rows)
 	printf("[OK => Erase Flash Program Memory]\n");
 }
 
-void main_eraseflash(int argc, char **argv)
+void main_eraseflash(int fd)
 {
-	int rows = 0;
-	long int startaddr = 0;
+	
+	if( rows <= 0 || startaddr < 0 )
+	{
+		printf("ERROR: you need to specify both --rows and --startaddr\n");
+		exit(-1);
+	}
 
-	if( argc != 6 )
-		usage(argv[0]);
-
-	if( strcmp(argv[2], "--rows") != 0 )
-		usage(argv[0]);
-	if( strcmp(argv[4], "--startaddr") != 0 )
-		usage(argv[0]);
-	if( atoi(argv[3]) == 0 )
-		usage(argv[0]); 
-	else
-		rows = atoi(argv[3]);
-
-	if( sscanf(argv[5], "0x%x", &startaddr)==0 )
-		usage(argv[0]);
-
-	eraseflash(startaddr, rows);
+	eraseflash(fd, startaddr, rows);
 }
 
-void main_writeflash(int argc, char **argv)
+void main_writeflash(int fd)
 {
     int i, ret=OK;
 	FILE * f;
 	int words = 0;
-	int bytes;
-	int startaddr = 0;
+	int xbytes;
+	int xstartaddr = 0;
 	unsigned int membuffer[10];
 
-	if( argc != 4 )
-		usage(argv[0]);
-
-	if( strcmp(argv[2], "--hexfile") != 0 )
-		usage(argv[0]);
-	if( (f = fopen(argv[3], "r") )==NULL )
+	if( strlen(hexfile) < 1 )
 	{
-		printf("Error: could not open hexfile '%s'\n", argv[2]);
+		printf("ERROR: you need to specify --hexfile <filename>\n");
+		exit -1;
+	}
+
+	if( (f = fopen(hexfile, "r") )==NULL )
+	{
+		printf("Error: could not open hexfile '%s'\n", hexfile);
 		close(fd);
 		exit(-2);
 	}
 
-    // erase from startaddress to end of memory(size is 18F452 specific)	
-//	for( i=startaddr; i<(32768/64); i+=64);
-//	{
-//	   eraseflash(i, 1);
-//	}
 	do {
-		ret = readihexline(f, membuffer, &startaddr, &words);
-		startaddr = startaddr * 2; // we need the byte counted addr not word counted
-		bytes = words *2;
+		ret = readihexline(f, membuffer, &xstartaddr, &words);
+		xstartaddr = xstartaddr * 2; // we need the byte counted addr not word counted
+		xbytes = words *2;
 		switch(ret)
 		{
-			case OK: printf("line read from hexfile had startaddress=0x%04X with length %ibytes\n", startaddr, bytes);
-			   writeflash(fd, membuffer, startaddr, words);
+			case OK: printf("line read from hexfile had startaddress=0x%04X with length %ibytes\n", xstartaddr, xbytes);
+			   writeflash(fd, membuffer, xstartaddr, words);
 			   break;
 			case ENDOFFILE: break;
 			case JUNK: printf("[found junk in hexfile]\n");
@@ -601,7 +568,7 @@ void main_writeflash(int argc, char **argv)
 	} while(ret != ENDOFFILE );
 }
 
-void reset_pic()
+void reset_pic(int fd)
 {
 	printf("SENDing RESET: ");
         sendSTX(fd);
@@ -614,40 +581,217 @@ void reset_pic()
 	printf("[OK => RESET Device]\n");
 }
 
+
+int number_arg(char * str) /* converts a string into a number, checks if decimal or hex, returns -1 if error */
+{
+	char * hex_prefix = "0x";
+	char prfx[3] = "\0\0\0";
+	int value = -1;
+	if( strlen(str) > 63 )
+	{
+		printf("ERROR: option too long\n");
+		return -1;
+	}
+	if( strlen(str) > 2 )
+	{
+		strncpy(prfx, str, 2);
+		if( strcmp(hex_prefix, prfx) == 0 ) /* hex number */
+		{
+			if( sscanf(str, "0x%x", &value)==0 )
+				value = -1;
+			return value;
+		}
+	}
+	value = atoi(str);
+	return value;
+}
+
+
+/* main options */
+enum
+{
+	WR_FLASH,
+	RD_FLASH,
+	ER_FLASH,
+	WR_EEPROM,
+	RD_EEPROM,
+	ER_EEPROM,
+	RESET,
+};
+
+int action=-1;
+
+static struct option long_options[] =
+{
+	/* main options */
+	{"writeflash", no_argument, &action, WR_FLASH},
+	{"readflash", no_argument, &action, RD_FLASH},
+	{"eraseflash", no_argument, &action, ER_FLASH},
+	{"writeeeprom", no_argument, &action, WR_EEPROM},
+	{"readeeprom", no_argument, &action, RD_EEPROM},
+	{"eraseeeprom", no_argument, &action, ER_EEPROM},
+	{"reset", no_argument, &action, RESET},
+	/* normal options */
+	{"device", required_argument, 0, 'd'},
+	{"bytes", required_argument, 0, 'b'},
+	{"startaddr", required_argument, 0, 'a'},
+	{"hexfile", required_argument, 0, 'f'},
+	{"rows", required_argument, 0, 'r'},
+	{"help", no_argument, 0, 'h'},
+	{0,0,0,0}
+};
+	
 int main(int argc, char **argv)
 {
-	int speed=B19200;
-	int flags=CS8;
+	int c;
+	int fd=-1;
 
+	strcpy(dev, "/dev/ttyS0"); /* default device */
+	strcpy(hexfile, "\0\0\0");  /* set to zero */
 	fcntl(1, F_SETFL, O_SYNC);
-	
-	if( argc < 2 )
-	   usage(argv[0]);
 
-	if( (fd = open("/dev/ttyS0", O_RDWR | O_NOCTTY/* | O_NONBLOCK*/)) < 0 )
+	while (1)
 	{
-		perror("an851bootloader");
-		return 1;
+		/* `getopt_long' stores the option index here. */
+		int option_index = 0;
+		c = getopt_long (argc, argv, "d:b:a:f:r:h",
+			long_options, &option_index);
+	  
+		/* Detect the end of the options. */
+		if (c == -1)
+			break;
+	  
+		switch (c)
+		{
+			case 0:
+				/* If this option set a flag, do nothing else now. */
+				if (long_options[option_index].flag != 0)
+					break;
+				printf ("option %s", long_options[option_index].name);
+				if (optarg)
+					printf (" with arg %s", optarg);
+				printf ("\n");
+				break;
+			
+			case 'd':
+				if( strlen(optarg) > 63 )
+				{
+					printf("ERROR: argument for '--device' too long\n");
+					exit -1;
+				}
+				strcpy(dev, optarg);
+				printf("using device %s for serial comms\n", dev);
+				break;
+			
+			case 'b':
+				bytes = number_arg(optarg);
+				if( bytes <= 0 )
+				{
+					printf("ERROR: malformed argument for '--bytes'\n");
+					exit -1;
+				}
+				printf("with 0x%x (decimal: %i) bytes\n", bytes, bytes);
+				break;
+			
+			case 'a':
+				startaddr = number_arg(optarg);
+				if( startaddr < 0 )
+				{
+					printf("ERROR: malformed argument for '--startaddr'\n");
+					exit -1;
+				}
+				printf("startaddr=0x%x (decimal: %i)\n", startaddr, startaddr);
+				break;
+			
+			case 'f':
+				if( strlen(optarg) > 63 )
+				{
+					printf("ERROR: argument for '--hexfile' too long\n");
+					exit -1;
+				}
+				strcpy(hexfile, optarg);
+				printf("using hexfile '%s'\n", hexfile);
+				break;
+			
+			case 'r':
+				rows = number_arg(optarg);
+				if( rows <= 0 )
+				{
+					printf("ERROR: malformed argument for '--rows'\n");
+					exit -1;
+				}
+				printf("rows to delete 0x%x (decimal %i)\n", rows, rows);
+				break;
+				
+			case 'h':
+				printf("Help:\n");
+				usage(argv[0]);
+				break;
+				
+			case '?':
+				/* `getopt_long' already printed an error message. */
+				break;
+				
+			default:
+				abort ();
+		}
+	}
+  
+	if( (fd = open(dev, O_RDWR | O_NOCTTY)) <= 0 )
+	{
+		printf("ERROR: could not open serial device '%s'\n", dev);
+		exit -1;
 	}
 	setline(fd, flags, speed);
 	serialWrite(fd, TICKLE); // send tickle byte
 
-	if( strcmp(argv[1], "--writeflash" ) == 0 )
-		main_writeflash(argc, argv);
-	else if( strcmp(argv[1], "--eraseflash" ) == 0 )	
-		main_eraseflash(argc, argv);
-	else if( strcmp(argv[1], "--readflash" ) == 0 )	
-		main_readflash(argc, argv);
-	else if( strcmp(argv[1], "--reset" ) == 0 )
-		reset_pic();
- 	else if( strcmp(argv[1], "--readeeprom" ) == 0 )
- 		main_readeeprom(argc, argv); 
-/* 	else if( strcmp(argv[1], "writeeeprom" ) == 0 )	 */
-/* 		main_writeeeprom(argc, argv); */
-/* 	else if( strcmp(argv[1], "" ) == 0 )	 */
-/* 		main_(argc, argv); */
-	else 	
+	/* Print any remaining command line arguments (not options). */
+	if (optind < argc)
+	{
+		printf("unknown arguments: ");
+		while (optind < argc)
+			printf ("%s ", argv[optind++]);
+		putchar ('\n');
 		usage(argv[0]);
+	}
+
+	switch(action)
+	{ 
+		case WR_FLASH:
+			printf("action: write flash\n");
+			main_writeflash(fd);
+			break;
+		case RD_FLASH:
+			printf("action: read flash\n");
+			main_readflash(fd);
+			break;
+		case ER_FLASH:
+			printf("action: erase flash\n");
+			main_eraseflash(fd);
+			break;
+		case WR_EEPROM:
+			printf("action: write eeprom\n");
+/*			main_writeeeprom(fd); */
+			printf("\n\tNOT IMPLEMETED YET\n\n");
+			break;
+		case RD_EEPROM:
+			printf("action: read eeprom\n");
+			main_readeeprom(fd);
+			break;
+		case ER_EEPROM:
+			printf("action: erase eeprom\n");
+/*			main_eraseeeprom(fd); */
+			printf("\n\tNOT IMPLEMETED YET\n\n");
+			break;
+		case RESET:
+			printf("resetting PIC\n");
+			reset_pic(fd);
+			break;
+		default:
+			printf("You need to specify the action to take\n");
+			usage(argv[0]);
+	}
+   
 
 	close(fd);
 
