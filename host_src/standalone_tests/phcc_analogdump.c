@@ -23,10 +23,10 @@ int main(int argc, char * argv[])
 	}
 
 	printf("using %s at %i baud\n", dev, baudrate);
-	printf("requesting full keymatrix from PHCC\n");
-	b = 0x04;   // keymatrix get
+	printf("requesting analog map from PHCC\n");
+	b = 0x05;   // analogmap get
 	serialWrite(b);
-	for(i=0; i<1+128+2; i++)
+	for(i=0; i<1+35*2+2; i++)
 	{
 		unsigned char bret;
 		serialRead(&bret);
