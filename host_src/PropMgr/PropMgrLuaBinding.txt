@@ -1,0 +1,19 @@
+Functions
+
+for Output:
+- LedOn(DO_channel, addr, subaddr, bit)
+- LedOff(DO_channel, addr, subaddr, bit)
+- LCDPrint(DOA_addr,"Text")
+- LCDClear(DOA_addr)
+- StepFWD()
+- StepREV()
+- ServoPos()
+- AnalogOut(DO_channel, addr, subaddr, value)
+- RelaisOn()
+- RelaisOff()
+- DOARaw()
+- DOBRaw()
+
+Input by installing handlers
+- ReadKey() -- reads from the state array cached by PC. state array initally built using KeyMatrixFullMap and updates from matrix
+
