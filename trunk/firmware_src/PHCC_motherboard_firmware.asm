@@ -151,8 +151,9 @@ delaycounterdoa
 			doa_devaddr, doa_subaddr, doa_data
 			dob_addr, dob_data
 			i2cout_addr, i2cout_subaddr, i2cout_data
-
-			tmp, tmp2, antmp, antmpH, antmpL
+			anbufH, anbufL, an_addr
+			
+			tmp, tmp2, antmp, keytmp
 			counter, counter2, counterkmx, counteran, ledcounter
 			adr4067
 			adr154
@@ -161,6 +162,11 @@ delaycounterdoa
 #define BANK_analog 0x1
 		CBLOCK 0x100				;; bank 1
 			analogin:ANALOG_CHANNEL_STORAGE_SIZE			
+;;;;;;;;;;;;;			analogin_last:ANALOG_CHANNEL_STORAGE_SIZE			
+	;; + analog values are 10bit.
+	;; + LSB aligned.
+	;; + two bytes RAM used per value, first the High byte, then the Low byte
+	;; + analogin_last holds the previous value (used for filtering)
 		ENDC
 
 #define BANK_matrix 0x2
@@ -937,30 +943,34 @@ keymatrix_checknextchanged:
 		BNC		keymatrix_nochange	; a '1' in carry denotes "button changed", otherwise jump over next sect.
 
 keymatrix_ischange:
-		; first send row/column address out to host
-		; format: row/column:[0|1]CRLF  eg: 3/0:1\r\n
-		SWAPF	col_addr, W			; retrieve swapped version of 7bit column addr
-		ANDLW	b'00001111'			; hex gets sent out by nibbles, so clip unwanted part out
-		RCALL	convert2hex			; convert it into an (ascii-)hex representation
+		; there was a change, so we tell the host
+		MOVFF	col_addr, keytmp	; need a working copy of the 7bit column address
+		RRNCF	keytmp, F			; build A9-A7 of first byte for packet from bits <6:4> of col_addr (1)
+		RRNCF	keytmp, F			; which means that we must do four rotate-right's (2)
+		RRNCF	keytmp, F			; (3)
+		RRNCF	keytmp, W			; (4)
+		ANDLW	b'00000111'			; mask out unused bits
+		IORLW	b'00101000'			; and add packet-type header via OR
 		RCALL	rs232_send			; and send to host
-		MOVF	col_addr, W			; retrieve 7bit column addr, now for the lower nibble
-		ANDLW	b'00001111'			; clip out the unwanted part
-		CALL	convert2hex			; convert it into an (ascii-)hex representation
-		RCALL	rs232_send			; and send to host
-		MOVLW	'/'					; seperator char
-		RCALL	rs232_send			; send
+		; second byte
+		; build lower 3 bits of addr, A2-A0		
 		DECF	counterkmx, W		; need a zero-based version of bitcounter in W
-		CALL	convert2hex			; convert it into an (ascii-)hex representation
-		RCALL	rs232_send			; send
-		MOVLW	':'					; seperator between addr and new value
-		RCALL	rs232_send			; send
+		MOVWF	keytmp				; counterkmx points to the bit number (address) of the changed bit/keymatrix input
+		RLNCF	keytmp, W			; shift into position for second byte, bits <3:1>
+		ANDLW	b'00001110'			; mask it
+		MOVWF	keytmp				; back into tmp storage
 		; now find out if switch/button changed from "open" to "close"(0) or from "close" to "open"(1)
-		MOVLW	'0'					; preset as '0'
 		RLCF	keyinput_new, F		; shift temp copy of new state to stay in sync with bit being worked on
 		BTFSC	STATUS, C			; new state: button/switch closed or open ?
-		MOVLW	'1'					; if it is now closed, send a '1'
+		BSF		keytmp, 0			; bit0 of second byte shows state of input
+		; now add A6-3
+		RLNCF	col_addr, W			; lower four bits of col_addr are needed (1)
+		RLNCF	WREG, W				; and they need to be shifted left four bits (2)
+		RLNCF	WREG, W				; (3)
+		RLNCF	WREG, W				; (4)
+		ANDLW	b'11110000'			; mask
+		IORWF	keytmp, W			; and combine with the lower four bits part consisting of A2-A0 and the switch state
 		RCALL	rs232_send			; send new state
-		CALL	send_crlf			; send CRLF
 		BRA		keymatrix_checkchanges_end	; jump around nochange code
 
 
@@ -1002,37 +1012,36 @@ anp_adc_wait:
 		BTFSC	ADCON0, GO_DONE		; conversion is done when bit GO/!DONE is reset to zero by hardware
 		BRA		anp_adc_wait
 
+
+
 an_store:		
+		MOVFF	FSR2L, an_addr		; save low byte of address for later
 		CLRF	an_changed			; clear analog-value-changed flag
 				;; store AD result, *high byte* ***first***
-		MOVF	ADRESH, W			; save analog result (high byte) to memory pointed to by FSR2 + 1
-		CPFSEQ	INDF2				; compare new value high byte in W with old value at INDF2
-		BSF		an_changed, 0		; if not equal, set bit 0 of an_changed
-		MOVWF	POSTINC2			; store high byte, postinc not necessary, just looks better
-		MOVF	ADRESL, W			; save analog result (low byte) to memory pointed to by FSR2
-		CPFSEQ	INDF2				; compare new value low byte in W with old value at INDF2
-		BSF		an_changed, 1		; if not equal, set bit 1 of an_changed. if an_changed == 0x00 => no change
-		MOVWF	INDF2				; and then store the high byte at FSR2 
+		MOVFF	ADRESH, anbufH		; working copies of ADRESH...
+		MOVFF	ADRESL, anbufL		; ... and ADRESL are stored in anbufH/L
 
+		RCALL	an_anti_jitter		; filters value and stores if necessary
+		MOVFF	an_addr, FSR2L		; restore address
+
+		; tell host of change immediately
 		BTFSS	talk, 0				; is bit 0 of talk set ? (should we notify host of changed analog value?)
 		RETURN						; we return if talk bit<0> is not set
 
 an_send_host_update:
-		MOVLW	0x00				; do we need to send an update ?
-		CPFSEQ	an_changed			; if an_changed==0x00, then no change, don't have to send.
-		BRA		an_was_change
-		RETURN						; an_change was 0, no change, return
+		BTFSS	an_changed, 0
+		RETURN
+
 an_was_change:
 		; there was a change, so we tell the host
 		MOVLW	b'01010000'
 		CALL	rs232_send			; and send to host
-		MOVF	POSTDEC2, W			; get analog value low byte
-		MOVWF	antmpL				; save in temp. var
-		MOVF	INDF2, W			; get analog value high byte
-		MOVWF	antmpH
-		MOVLW	b'00000011'			; mask for the D<9:8> in antmpH
-		ANDWF	antmpH, F			; bitwise AND it
+		MOVFF	POSTINC2, anbufH	; get analog value high byte
+		MOVFF	INDF2, anbufL		; get analog value low byte
+		MOVLW	b'00000011'			; mask for the D<9:8> in anbufH
+		ANDWF	anbufH, F			; bitwise AND it
 		; get offset in analogin[]
+		MOVFF	an_addr, FSR2L		; restore address
 		MOVF	FSR2L, W
 		; shift once right (divide by two) since each analog value takes up two bytes in memory
 		RRNCF	WREG, W
@@ -1040,15 +1049,15 @@ an_was_change:
 		RLNCF	WREG, W
 		RLNCF	WREG, W				
 		ANDLW	b'11111100'			; mask out lower two bits, now we got A5-A0 in WREG<7:2>
-		IORWF	antmpH, W			; combine A5-0 and D9-8 in WREG
+		IORWF	anbufH, W			; combine A5-0 and D9-8 in WREG
 		CALL	rs232_send			; and send to host
-		MOVF	antmpL,W 			; retrieve low byte of analog value
+		MOVF	PREINC2, W			; retrieve low byte of analog value
 		CALL	rs232_send			; and send to host
 		RETURN
 
 
 ;;-------------------------------
-;; read_analog_secA
+;; read_analog_secA   read analog secondary channel A (connected to first 4067)
 ;;-------------------------------
 read_analog_secA:
 		LFSR	FSR2, analogin+(3*2)
@@ -1061,6 +1070,9 @@ read_analog_secA:
 		MOVLW	b'00000000'			; 4067 #1 connected to RA0/AN0
 		BRA		read_analog_sec
 
+;;-------------------------------
+;; read_analog_secB   read analog secondary channel B (connected to second 4067)
+;;-------------------------------
 read_analog_secB:
 		LFSR	FSR2, analogin+(19*2)
 		; add adr4067 to FSR0
@@ -1088,7 +1100,62 @@ ansec_adc_wait:
 
 		BRA		an_store			; store analog value in memory
 
+;;-------------------------------
+;; an_anti_jitter
+;;-------------------------------
+;; conditions on call:
+;;   FSR2 points to memory location analogin[] for *high byte* of current channel
+;;   new analog value is in anbufH/anbufL
+;;-------------------------------
+an_anti_jitter:
+		; basically a digital low pass filter
+		; difference of saved and new value
+		MOVF	anbufH, W			; high byte of new value in anbufH
+		XORWF	POSTINC2, W			; gets XORed with old value at analogin[i]
+		MOVWF	antmp				; store result of XOR
 
+		MOVLW	0x0					; high byte changed at all ?
+		CPFSGT	antmp				; compare XOR result with 1
+		BRA		anH_zero			; not > 0 => its zero
+
+		MOVLW	0x1					; difference in high byte can be at most 1 ('overflow')
+		CPFSGT	antmp				; compare XOR result with 1
+		BRA		anH_one				; result was > 1  => the change had a magnitude > 9 bits
+
+		; when we get here, high byte XOR result is > 1
+		BRA		bigchange
+
+#define JITTER_FILTER_COEFF 0x01
+
+
+anH_zero:
+		; difference of low byte
+		MOVF	anbufL, W			; low byte of new value in anbufL
+		XORWF	INDF2, W			; gets XORed with old value at analogin[i] (post decrement address 
+									;  so we are back pointing to the high byte)
+		MOVWF	antmp				; store result of XOR
+		MOVLW	JITTER_FILTER_COEFF	; jitter filter coefficient
+		CPFSGT	antmp				; compare result with jitter filter coefficient (currently 1)
+		RETURN						; no change in value after filtering
+		BRA		bigchange
+
+anH_one:
+		; difference of low byte
+		MOVF	anbufL, W			; low byte of new value in anbufL
+		XORWF	INDF2, W			; gets XORed with old value at analogin[i] (post decrement address 
+									;  so we are back pointing to the high byte)
+		MOVWF	antmp				; store result of XOR
+		MOVLW	256-JITTER_FILTER_COEFF	; 256 minus jitter filter coefficient 
+		CPFSLT	antmp				; compare result with jitter filter coefficient subtracted from 256
+		RETURN						; no change in value after filtering
+		BRA		bigchange
+
+bigchange:
+		BSF		an_changed, 0		; set analog value changed flag
+		; store it, FSR2 pionts to low byte when we get here
+		MOVFF	anbufL, POSTDEC2	; store low byte, then point FSR2 to pos of hight byte
+		MOVFF	anbufH, POSTINC2	; store high byte, set FSR2 the way its expected, ie. pointing to low byte
+		RETURN
 
 
 
@@ -1248,6 +1315,7 @@ clr_analog_next:
 		DECFSZ	counteran, F		; decrement counter, if zero
 		BRA		clr_analog_next		; no? repeat
 									; yes? go on
+
 		RETURN
 
 
