@@ -4,7 +4,7 @@
 //
 //  X11GC is a Glass Cockpit Software Suite for X11,
 //  which does NOT use OpenGL but relies only on xlib.
-//  Copyright (C) 2003 Manuel Bessler
+//  Copyright (C) 2003-2005 Manuel Bessler
 //
 //  The full text of the legal notices is contained in the file called
 //  COPYING, included with this distribution.
@@ -75,6 +75,16 @@ PropertyMgr::~PropertyMgr()
 void PropertyMgr::addIOHandler(PropertyIO * _propiohandler)
 {
    IOHandlers.push_back(_propiohandler);
+}
+void PropertyMgr::addPHCC(PropertyIO_PHCC * _phcc)
+{
+   addIOHandler(_phcc);
+   phcc = _phcc;
+}
+
+PropertyIO_PHCC * PropertyMgr::getPHCC()
+{
+   return phcc;
 }
 
 void PropertyMgr::addTimerOneshot(Timer * _timer)

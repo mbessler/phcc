@@ -4,7 +4,7 @@
 //
 //  X11GC is a Glass Cockpit Software Suite for X11,
 //  which does NOT use OpenGL but relies only on xlib.
-//  Copyright (C) 2003 Manuel Bessler
+//  Copyright (C) 2003-2005 by Manuel Bessler
 //
 //  The full text of the legal notices is contained in the file called
 //  COPYING, included with this distribution.
@@ -62,6 +62,7 @@ class PHCCScriptLua
 		int setProperty(lua_State *L);
 		int registerCallback(lua_State *L);
 		int registerTimerOneshot(lua_State *L);
+		int sendPHCC(lua_State *L);
 	public:
 		static const char className[];
 		static Luna<PHCCScriptLua>::RegType methods[];

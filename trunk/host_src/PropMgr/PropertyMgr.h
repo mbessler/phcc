@@ -4,7 +4,7 @@
 //
 //  X11GC is a Glass Cockpit Software Suite for X11,
 //  which does NOT use OpenGL but relies only on xlib.
-//  Copyright (C) 2003 Manuel Bessler
+//  Copyright (C) 2003-2005 by Manuel Bessler
 //
 //  The full text of the legal notices is contained in the file called
 //  COPYING, included with this distribution.
@@ -63,6 +63,8 @@ class PropertyMgr
 		PropertyValue * get(std::string path);  // returns NULL if it does not exist
 		PropertyValue * addLeaf(std::string path); // returns created PropertyValue
 		void addIOHandler(PropertyIO * _propiohandler);
+		void addPHCC(PropertyIO_PHCC * _phcc);
+		PropertyIO_PHCC * getPHCC();
 		void addTimerOneshot(Timer * _timer);
 		void addPeriodicTimer(Timer * _timer);
 		void run();  // this is where we wait for something happen, poll for events in DisplayMgr and PropertyAccess* modules
@@ -79,6 +81,7 @@ class PropertyMgr
 		static bool running;
 		RunningFlagHandler runningflaghandler;
 		TimerQueue tq;
+		PropertyIO_PHCC * phcc;
 		friend class RunningFlagHandler;
 };
 

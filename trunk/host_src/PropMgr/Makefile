@@ -1,3 +1,7 @@
+USE_CCACHE=0
+USE_LUA=1
+USE_DEBUG=0
+
 srcdir=.
 
 ROOT=
@@ -6,27 +10,34 @@ exec_prefix=${prefix}
 bindir=$(ROOT)${exec_prefix}/bin
 mandir=$(ROOT)${prefix}/man
 
-CXX=ccache g++
-#CXX=g++
-CC=ccache gcc
-#CC=gcc
 
-CFLAGS=-I. -g -pedantic -Wall
-# -DWITH_LUA
-#`sigc-config --cflags`
-#-pg -fprofile-arcs
-#-DDEBUG
+ifeq ($(USE_CCACHE),1)
+    CXX=ccache g++
+    CC=ccache gcc
+else
+    CXX=g++
+    CC=gcc    
+endif
 
-LDFLAGS=
-#for lua:
-#LDFLAGS=-llua -llualib -lm -ldl
+ifeq ($(USE_LUA),1)
+    CFLAGS=-I. -g -pedantic -Wall -DWITH_LUA
+    LDFLAGS=-llua -llualib -lm -ldl
+
+else
+    CFLAGS=-I. -g -pedantic -Wall
+    LDFLAGS=
+endif
+
+ifeq ($(USE_DEBUG),1)
+    CFLAGS:=$(CFLAGS) -DDEBUG
+endif
 
 
 TEX=pslatex
 DVIPS=dvips
 PS2PDF=ps2pdf
 TXT2PS=enscript
-TXT2PSOPT=-Ecpp -b '$$n|Manuel Bessler|$$% of $$='  -T 4 -M letter
+TXT2PSOPT=-Ecpp -T 4 -M letter
 # --color
 
 INSTALL=/usr/bin/install -c
@@ -36,8 +47,15 @@ INSTALL_DIR=mkdir -p
 
 PROGS=varmgrtest
 
-HEADERS=OnChangeObj.h PropertyMgrCommon.h PropertyMgr.h PropertyBranch.h PropertyLeaf.h PropertyValue.h TimeStamp.h PropertyIO.h Timer.h FDstream.h PropMgrLuaBinding.h
-CPPOBJS=PropertyValue.o PropertyLeaf.o PropertyBranch.o PropertyMgr.o TimeStamp.o PropertyIO.o Timer.o PropMgrLuaBinding.o
+HEADERS=OnChangeObj.h PropertyMgrCommon.h PropertyMgr.h PropertyBranch.h PropertyLeaf.h PropertyValue.h TimeStamp.h PropertyIO.h Timer.h FDstream.h
+CPPOBJS=PropertyValue.o PropertyLeaf.o PropertyBranch.o PropertyMgr.o TimeStamp.o PropertyIO.o Timer.o 
+
+ifeq ($(USE_LUA),1)
+    HEADERS:=$(HEADERS) PropMgrLuaBinding.h
+    CPPOBJS:=$(CPPOBJS) PropMgrLuaBinding.o
+    PROGS=varmgrtestlua
+endif
+
 COBJS=
 TEXS=*.tex
 CPPSRCS=*.cpp

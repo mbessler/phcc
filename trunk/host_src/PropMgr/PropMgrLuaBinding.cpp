@@ -4,7 +4,7 @@
 //
 //  X11GC is a Glass Cockpit Software Suite for X11,
 //  which does NOT use OpenGL but relies only on xlib.
-//  Copyright (C) 2003 Manuel Bessler
+//  Copyright (C) 2003-2005 by Manuel Bessler
 //
 //  The full text of the legal notices is contained in the file called
 //  COPYING, included with this distribution.
@@ -223,6 +223,29 @@ int PHCCScriptLua::registerTimerOneshot(lua_State *L)
    return 1;  // number of returned values
 }
 
+int PHCCScriptLua::sendPHCC(lua_State *L)
+{ // usage from lua: x:sendPHCC(stringof8bitbytes)
+   if( ! lua_isstring(L, 1) )
+   {
+	  lua_pushstring(L, "first argument needs to be a string!");
+	  lua_error(L);
+   }
+   int strlen = lua_strlen(L, 1);
+//   printf("l=%i\n", strlen);
+   const unsigned char * dataToSend = (unsigned char *)lua_tostring(L, 1);
+   //get ref to PropertyIO_PHCC
+   PropertyIO_PHCC * phcc = mgr.getPHCC();
+   for(int i=0; i<strlen; ++i)
+   {
+//	  printf("sending byte 0x%x\n", dataToSend[i]);
+	  phcc->serialWrite(dataToSend[i]);
+   }
+   lua_pushnumber(L, 1);
+   return 1;  // number of returned values
+}
+
+
+
 const char PHCCScriptLua::className[] = "PHCCScriptLua";
 
 #define method(class, name) {#name, &class::name}
@@ -232,6 +255,7 @@ Luna<PHCCScriptLua>::RegType PHCCScriptLua::methods[] = {
   method(PHCCScriptLua, setProperty),
   method(PHCCScriptLua, registerCallback),
   method(PHCCScriptLua, registerTimerOneshot),
+  method(PHCCScriptLua, sendPHCC),
   {0,0}
 };
 
