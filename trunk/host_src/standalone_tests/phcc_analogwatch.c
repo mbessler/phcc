@@ -34,7 +34,8 @@ int main(int argc, char * argv[])
 		serialRead(&b1);
 		serialRead(&b2);
 		serialRead(&b3);
-		printf("0x%02x 0x%02x 0x%02x\n", b1, b2, b3);
+//		printf("0x%02x 0x%02x 0x%02x\n", b1, b2, b3);
+		printf("channel %d=0x%02x%02x\n", (b2>>2), (b2&0x03), b3);
 	}
 
 
