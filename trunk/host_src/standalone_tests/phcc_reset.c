@@ -23,17 +23,12 @@ int main(int argc, char * argv[])
 	}
 
 	printf("using %s at %i baud\n", dev, baudrate);
-	printf("requesting full keymatrix from PHCC\n");
-	b = 0x04;   // keymatrix get
-	serialWrite(b);
-	for(i=0; i<1+128+2; i++)
-	{
-		unsigned char bret;
-		serialRead(&bret);
-		printf("0x%02x ", bret);
-	}
-	printf("\n");
-
+        printf("sending RESET to PHCC\n");
+        b = 0x01;   // PHCC reset
+        serialWrite(b);
+        serialWrite(b);
+        serialWrite(b);
+						
 	closedevice();
 	mb_options_done();
 	exit(0);

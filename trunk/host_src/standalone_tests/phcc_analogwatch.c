@@ -23,17 +23,26 @@ int main(int argc, char * argv[])
 	}
 
 	printf("using %s at %i baud\n", dev, baudrate);
-	printf("requesting full keymatrix from PHCC\n");
-	b = 0x04;   // keymatrix get
+	printf("sending STARTTALKING to PHCC\n");
+	b = 0x02;
 	serialWrite(b);
-	for(i=0; i<1+128+2; i++)
+	
+	printf("real-time analog dump from PHCC:\n");
+	while(1)
 	{
-		unsigned char bret;
-		serialRead(&bret);
-		printf("0x%02x ", bret);
+		unsigned char b1, b2, b3;
+		serialRead(&b1);
+		serialRead(&b2);
+		serialRead(&b3);
+		printf("0x%02x 0x%02x 0x%02x\n", b1, b2, b3);
 	}
-	printf("\n");
 
+
+	//MB TODO need a signal handler to reach this
+	printf("sending STARTTALKING to PHCC\n");
+	b = 0x03;
+	serialWrite(b);
+	
 	closedevice();
 	mb_options_done();
 	exit(0);
