@@ -4,7 +4,7 @@
 //
 //  X11GC is a Glass Cockpit Software Suite for X11,
 //  which does NOT use OpenGL but relies only on xlib.
-//  Copyright (C) 2003 Manuel Bessler
+//  Copyright (C) 2003-2005 by Manuel Bessler
 //
 //  The full text of the legal notices is contained in the file called
 //  COPYING, included with this distribution.
@@ -38,6 +38,7 @@
 
 #include <iosfwd>
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <string>
 //#include <istream>
@@ -51,6 +52,7 @@
 #include <fcntl.h>
 //#include <errno.h> /* Error number definitions */ 
 #include <termios.h> // terminal/serial stuff
+#include <stdlib.h>
 
 #include "PropertyMgrCommon.h"
 #include "OnChangeObj.h"
@@ -104,23 +106,40 @@ class PropertyIOcmdline : public PropertyIO
 };
 
 
-class PropertyIO_PicKeyMatrix : public PropertyIO
+class PropertyIO_PHCC : public PropertyIO
 {
+#define KEYMATRIX_INPUTS 1024
+// up to 1024 keys (assuming 32bit ints, we need an array of 32 ints)
+#define KEYMATRIX_ARRAYSIZE KEYMATRIX_INPUTS/32
+
+// 33 channels of analog inputs
+#define ANALOG_INPUTS 33
+#define ANALOG_ARRAYSIZE ANALOG_INPUTS
 	public:
-		PropertyIO_PicKeyMatrix(PropertyMgr * _pmgr);
-		~PropertyIO_PicKeyMatrix();
+		PropertyIO_PHCC(PropertyMgr * _pmgr);
+		~PropertyIO_PHCC();
 		int getFD(int ** _fdarray);
 		bool processInput();
 		void onChange(PropertyValue * _pv); // does nothing here, since we cannot set the keys :)
-	protected:
-		void setLineDiscipline();
-		int serialRead(unsigned char * _byte);
-//		unsigned char serialRead();
 		void serialWrite(unsigned char _byte);
+	protected:
+		void setLineDiscipline(int flags, int speed);
+		int serialRead(unsigned char * _byte);
+		int baudrate_check(int speed);
+		void process_key_update();
+		void process_analog_update();
+		void process_keymatrix_map();
+		void process_analog_map();
 	protected:
 		int bytecounter;
 		int serialFD;
-		int matrix_state[16]; // up to 512 keys (assuming 32bit ints, we need an array of 16 ints)
+		int matrix_state[KEYMATRIX_ARRAYSIZE]; // digital inputs buffer
+		int an_state[ANALOG_ARRAYSIZE];  // analog inputs buffer
+		unsigned char inbuf[256];
+		int inbufidx;
+		unsigned char package_type;
+		enum InStates { WAITFOR_FIRSTBYTE, WAITFOR_NEXTBYTE, WAITFOR_FF_BYTE, WAITFOR_00_BYTE };
+		InStates input_state;
 };
 
 // class PropertyIO_XMLStream : public PropertyIO

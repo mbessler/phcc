@@ -10,6 +10,8 @@
 using namespace std;
 
 PropertyMgr mgr;
+extern int startLua();
+
 
 class testcallback : public OnChangeObj
 {
@@ -25,6 +27,7 @@ int main()
    {
 	  testcallback tcb;
 	  string p("/a/bb/ccc/dddd/eeeee/ffffff");
+//	  PropertyMgr mgr;
 	  cout << " print #1" << endl;
 	  mgr.print();
 	  
@@ -55,7 +58,13 @@ int main()
 	  r1->set(23);
 	  PropertyValue * r3 = mgr.get("/dict/text/str");
 	  r3->set(string("unit TESTING in progress..."));
-	  
+
+////////////////////////////	  
+	  startLua();
+////////////////////////////
+	mgr.addIOHandler(new PropertyIOcmdline(&mgr));
+	mgr.addPHCC(new PropertyIO_PHCC(&mgr));
+	
 	  mgr.run();
 
 	  cout << " print #4" << endl;

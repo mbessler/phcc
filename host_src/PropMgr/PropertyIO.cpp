@@ -4,7 +4,7 @@
 //
 //  X11GC is a Glass Cockpit Software Suite for X11,
 //  which does NOT use OpenGL but relies only on xlib.
-//  Copyright (C) 2003 Manuel Bessler
+//  Copyright (C) 2003-2005 by Manuel Bessler
 //
 //  The full text of the legal notices is contained in the file called
 //  COPYING, included with this distribution.
@@ -227,142 +227,247 @@ bool PropertyIOcmdline::CmdLineParse()
 
 //////////////////////////////////////////////////////////////////////
 
-
-PropertyIO_PicKeyMatrix::PropertyIO_PicKeyMatrix(PropertyMgr * _pmgr)
-   : PropertyIO(_pmgr)
+PropertyIO_PHCC::PropertyIO_PHCC(PropertyMgr * _pmgr)
+   : PropertyIO(_pmgr), package_type(0), input_state(WAITFOR_FIRSTBYTE)
 {
-   bytecounter = 0;
-   for(int i=0; i< 16; ++i )
-	  matrix_state[i] = 0;
-   serialFD = open("/dev/ttyS0", O_RDWR | O_NOCTTY | O_NONBLOCK);
-   if( serialFD == -1 )
+   int flags=CS8;
+   int baudrate = -1;
+   int speed = 115200;
+   char * dev = "/dev/ttyS0";
+
+   serialFD = open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
+   if( serialFD < 0 )
    {
-	  cerr << "Could not open serial port for connection to PicKeyMatrix!" << endl;
+	  cerr << "Could not open serial port for connection to PHCC!" << endl;
+//	  return -1;
+	  exit(-1);
    }
-   setLineDiscipline();
+
+   if( (baudrate = baudrate_check(speed)) == -1 )
+   {
+	  cerr << "ERROR, invalid speed for PHCC: " << speed << endl;
+//	  return -1;
+	  exit(-1);
+   }
+
+   tcflush(serialFD, TCIOFLUSH);
+   setLineDiscipline(flags, baudrate);
    fcntl(serialFD, F_SETFL, 0);
+
+   //// setup datastructures
+   int i;
+   for(i=0; i<KEYMATRIX_ARRAYSIZE; ++i)
+	  matrix_state[i] = 0;
+   for(i=0; i<ANALOG_ARRAYSIZE; ++i)
+	  an_state[i] = 0;
+   inbufidx=0;
+   for(i=0; i<256; ++i)
+	  inbuf[i] = 0;
 }
 
-PropertyIO_PicKeyMatrix::~PropertyIO_PicKeyMatrix()
+PropertyIO_PHCC::~PropertyIO_PHCC()
 {
    close(serialFD);
 }
-
-int PropertyIO_PicKeyMatrix::getFD(int ** _fdarray)
+int PropertyIO_PHCC::getFD(int ** _fdarray)
 {
    *_fdarray = &serialFD;
    return 1;
 //   return serialFD;
 }
 
-bool PropertyIO_PicKeyMatrix::processInput()
-{  // format: row/column:[0|1]CRLF  eg: 3/0:1\r\n
-   cout << __PRETTY_FUNCTION__ << endl;
+bool PropertyIO_PHCC::processInput()
+{
    unsigned char byte;
-   int row=0, column=0, state_on=0;
-   bool validdata = true;
-   fcntl(serialFD, F_SETFL, FNDELAY);
+   fcntl(serialFD, F_SETFL, FNDELAY);  // set filedescriptor to non-blocking
    while(serialRead(&byte) >= 0 )
    {
-//	  cout << __PRETTY_FUNCTION__ << " returned " << byte << "  validdata=" << validdata << endl;
-	  switch( bytecounter )
+	  // what state are we in ?
+	  switch(input_state)
 	  {
-		 case 0:
-			if( byte >= '0' && byte <= '7' )
-			   row = byte-48;
-			else 
-			   validdata = false;
+		 case WAITFOR_FIRSTBYTE:
+			// extract the three MSBs. these indicate the package type
+			package_type = ((byte>>5)&0x03);
+			switch( package_type)
+			{
+			   case 0x0: // all-bits-zero-byte
+				  break;
+			   case 0x1: // key matrix update
+				  inbuf[inbufidx++]=byte;
+				  input_state = WAITFOR_NEXTBYTE;
+				  break;
+			   case 0x2: // analog update
+				  inbuf[inbufidx++]=byte;
+				  input_state = WAITFOR_NEXTBYTE;
+				  break;
+			   case 0x3: // I2C packet
+				  // not implemented yet
+				  break;
+			   case 0x4: // keymatrix full bitmap
+				  inbuf[inbufidx++]=byte;
+				  input_state = WAITFOR_NEXTBYTE;
+				  break;
+			   case 0x5: // analog all axes dump
+				  inbuf[inbufidx++]=byte;
+				  input_state = WAITFOR_NEXTBYTE;
+				  break;
+			   case 0x6: // [unused]
+				  break;
+			   case 0x7: // all-bits-one-byte
+				  break;
+			   default:  // nothing
+				  break;
+			}
 			break;
-		 case 1:
-			if( byte != '/' )
-			   validdata = false;
+		 case WAITFOR_NEXTBYTE:
+			switch( package_type)
+			{
+			   case 0x1: // key matrix update
+				  inbuf[inbufidx++]=byte;
+				  input_state = WAITFOR_FIRSTBYTE;
+				  process_key_update();
+				  inbufidx = 0;
+				  break;
+			   case 0x2: // analog update
+				  inbuf[inbufidx++]=byte;
+				  if( inbufidx == 3)
+				  {
+					 input_state = WAITFOR_FIRSTBYTE;
+					 process_analog_update();
+					 inbufidx = 0;
+				  }
+				  break;
+			   case 0x4: // keymatrix full bitmap
+				  inbuf[inbufidx++]=byte;
+				  if( inbufidx >= 131)
+				  {
+					 input_state = WAITFOR_FIRSTBYTE;
+					 process_keymatrix_map();
+					 inbufidx = 0;
+				  }
+				  break;
+			   case 0x5: // analog all axes dump
+				  inbuf[inbufidx++]=byte;
+				  if( inbufidx >= 48)
+				  {
+					 input_state = WAITFOR_FIRSTBYTE;
+					 process_analog_map();
+					 inbufidx = 0;
+				  }
+				  break;
+			   default:  // something else will reset to WAITFOR_FIRSTBYTE
+				  input_state = WAITFOR_FIRSTBYTE;
+				  inbufidx = 0;
+			}
 			break;
-		 case 2:
-			if( byte >= '0' && byte <= '7' )
-			   column = byte-48;
-			else
-			   validdata = false;
+		 case WAITFOR_FF_BYTE:
 			break;
-		 case 3:
-			if( byte != ':' )
-			   validdata = false;
-			break;
-		 case 4:
-			if( byte == '0' || byte == '1' )
-			   state_on = byte-48;
-			else
-			   validdata = false;
-			break;
-		 case 5:
-			if( byte != '\r' )
-			   validdata = false;
-			break;
-		 case 6:
-			if( byte != '\n' )
-			   validdata = false;
-			else
-			   bytecounter = -1; // ready for next packet/line
+		 case WAITFOR_00_BYTE:
 			break;
 		 default:
-			validdata = false;
-	  }
-	  ++bytecounter;
-   }
-   if( validdata )
-   {
-	  cout << "switch " << row << "/" << column << " turned ";
-	  if( state_on )
-	  {
-		 matrix_state[row] |= ( 1 << column ); // OR to turn bit on
-		 cout << "on" << endl;
-	  }
-	  else
-	  {
-		 matrix_state[row] ^= (0 << column ); //XOR to turn bit off
-		 cout << "off" << endl;
+			break;
 	  }
    }
-   else
-   {
-	  cout << "invalid data" << endl;
-	  bytecounter = 0; // reset after error for next packet/line
-   }
-   fcntl(serialFD, F_SETFL, 0);
-   
+   fcntl(serialFD, F_SETFL, 0);  // set filedescriptor back to blocking
    return true;  //TODO: needs EOF/connection closed handling to return false
 }
 
-void PropertyIO_PicKeyMatrix::onChange(PropertyValue * _pv)
+void PropertyIO_PHCC::process_key_update()
+{
+   cout << "received an key update: 0x" << 
+	  hex << setw(2) << ((inbuf[0]>>1)&0x03) <<
+	  hex << setw(2) << ((inbuf[0]<<7)&0x80)+((inbuf[1]>>1)&0x7F) <<
+	  "=" << (inbuf[1]&0x01) << endl;
+}
+
+void PropertyIO_PHCC::process_analog_update()
+{
+//   printf("channel %d=0x%02x%02x\n", (inbuf[1]>>2), (inbuf[1]&0x03), (inbuf[2]));
+  cout << "received an analog update: channel " << 
+	 dec << setw(2) << ((inbuf[1]>>2)&0x3F) << "=0x" <<
+	  hex << setw(2) << (inbuf[1]&0x03) <<
+	  hex << setw(2) << (inbuf[2]&0xFF) << endl;
+}
+
+void PropertyIO_PHCC::process_keymatrix_map()
+{
+   cout << "received full keymatrix" << endl;
+   for(int i=0; i<KEYMATRIX_ARRAYSIZE; ++i)
+   {
+	  matrix_state[i] = ((int(inbuf[4+i*4]) << 24) | (int(inbuf[3+i*4]) << 16) |
+						 (int(inbuf[2+i*4]) << 8) | (int(inbuf[1+i*4])));
+   }
+}
+
+void PropertyIO_PHCC::process_analog_map()
+{
+   cout << "received full analog map" << endl;
+   for(int i=0; i<ANALOG_INPUTS; ++i)
+   {
+	  an_state[i] = int(inbuf[1+i*4+i*1]);
+	  an_state[i] |= (int(inbuf[((i/4)+1)*5]) >> ((i%4)*2));
+   }
+}
+
+
+void PropertyIO_PHCC::onChange(PropertyValue * _pv)
 {// does nothing here, since we cannot set the keys :)
 }
 
-void PropertyIO_PicKeyMatrix::setLineDiscipline()
+void PropertyIO_PHCC::setLineDiscipline(int flags, int speed)
 {
    struct termios t;
 
    tcgetattr(serialFD, &t);
-   t.c_cflag = CS8 | CREAD | HUPCL | CLOCAL;
+
+   t.c_cflag = flags | CS8 | CREAD | HUPCL | CLOCAL | CRTSCTS;
    t.c_iflag = IGNBRK | IGNPAR;
    t.c_oflag = 0;
    t.c_lflag = 0;
-//   t.c_cc[VMIN ] = 1;
-//   t.c_cc[VTIME] = 0;
 
-   cfsetispeed(&t, B19200);
-   cfsetospeed(&t, B19200);
+   cfsetispeed(&t, speed);
+   cfsetospeed(&t, speed);
 
-   tcsetattr(serialFD, TCSANOW, &t);
+   tcsetattr(serialFD, TCSAFLUSH, &t);
 }
 
-int PropertyIO_PicKeyMatrix::serialRead(unsigned char * _byte)
+int PropertyIO_PHCC::serialRead(unsigned char * _byte)
 {
    return read(serialFD, _byte, 1); // returns 0 if fcntl(serialFD, F_SETFL, FNDELAY) set
 }
 
-void PropertyIO_PicKeyMatrix::serialWrite(unsigned char _byte)
+void PropertyIO_PHCC::serialWrite(unsigned char _byte)
 {
    write(serialFD, &_byte, 1);
    return;
 }
 
+int PropertyIO_PHCC::baudrate_check(int speed)
+{
+        switch(speed)
+        {
+                case 230400: return B230400;
+                case 115200: return B115200;
+                case 57600: return B57600;
+                case 38400: return B38400;
+                case 19200: return B19200;
+                case 9600: return B9600;
+                case 4800: return B4800;
+                case 2400: return B2400;
+                case 1800: return B1800;
+                case 1200: return B1200;
+                case 600: return B600;
+                case 300: return B300;
+                case 200: return B200;
+                case 150: return B150;
+                case 134: return B134;
+                case 110: return B110;
+                case 75: return B75;
+                case 50: return B50;
+                default: return -1;
+        }
+}
+
+
+//////////////////////////////////////////////////////////////////////
 
