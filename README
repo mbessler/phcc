@@ -1,0 +1,22 @@
+PHCC - The PIC HomeCockpit Controller
+
+
+PHCC is a modular I/O controller primarily developed for use in 
+Homecockpit Interfacing.
+
+
+The Software as well as the hardware designs are licensed under the
+GNU Public License (GPL).  See the LICENSE file.
+
+
+PHCC on the web:
+  http://cockpit.varxec.net/electronics/PHCC.html
+
+The software and the hardware designs are available via the
+subversion repository at
+  http://svn.varxec.net/
+  svn://svn.varxec.net/repos/trunk PHCC
+
+
+Enjoy
+MB
