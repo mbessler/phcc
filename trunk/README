@@ -7,6 +7,9 @@ Homecockpit Interfacing.
 
 The Software as well as the hardware designs are licensed under the
 GNU Public License (GPL).  See the LICENSE file.
+The bootloader firmware is based upon Microchip's Application Note AN851
+and is under a different license. 
+See the header of the asm file for details.
 
 
 PHCC on the web:
@@ -18,7 +21,7 @@ subversion repository at
 anonymous access:
   svn checkout svn://svn.varxec.net/repos/trunk PHCC
 with username/password: 
-  svn --username <user> checkout svn+ssh://svn.varxec.net/repos/trunk PHCC
+  svn checkout svn+ssh://<user>@svn.varxec.net/repos/trunk PHCC
 
 
 Enjoy
