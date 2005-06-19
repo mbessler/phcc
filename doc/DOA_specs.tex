@@ -1,0 +1,387 @@
+%\documentclass[11pt]{article}
+\documentclass[11pt]{scrartcl}
+%\usepackage{a4paper}
+\usepackage{fullpage}
+\usepackage{longtable}
+\usepackage{bytefield}
+\usepackage{color}
+\usepackage{pslatex}
+
+\title{PHCC Programmers Guide - Talking to DOA devices}
+\author{Manuel Bessler}
+\date{24 April 2005}
+
+% Set up hyperlink colors
+\definecolor{darkred}{rgb}{0.5,0,0}
+\definecolor{darkgreen}{rgb}{0,0.3,0}
+\definecolor{darkblue}{rgb}{0,0,0.5}
+\definecolor{darkbrown}{rgb}{0.28,0.07,0.07}
+
+\setlength{\parindent}{0pt} % don't indent paragraphs 
+
+\begin{document}
+\sloppy
+\maketitle
+
+\begin{abstract}
+This document is targetted at both hardware and software developers.
+It describes the data packets and board-specific configuration variables
+for the PHCC DOA (Digital Out Type A) daughterboards.
+\end{abstract}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%\setcounter{section}{1}
+
+\section{Protocol Overview}
+
+Communication with PHCC always involves the motherboard as the central "hub"
+of the PHCC system. On the hardware level, data is transferred back and forth
+between the host (PC) and PHCC via:
+\begin{itemize}
+\item serial port
+\item USB port
+\item (maybe in the future) ethernet
+\end{itemize}
+
+Data transfer to or from PHCC is broken down into \textbf{packets}.
+A \textbf{packet} consists of one or more \textbf{bytes}.
+In this document we shall only regard packets \textsl{from the host to PHCC}
+as DOA transfers are one way only.
+
+\begin{figure}[htbp] \begin{center}
+\setlength{\byteheight}{6ex}
+\setlength{\bitwidth}{1cm}
+\begin{bytefield}{8}
+\wordbox{1}{command byte} \\
+\wordbox{1}{optional payload data byte 0} \\
+\wordbox[]{1}{$\vdots$ \\[1ex]} \\
+\wordbox{1}{optional payload data byte N}
+\end{bytefield}
+\caption{Packet Layout}
+\label{packet layout}
+\end{center} \end{figure}
+
+As you can see from Figure \ref{packet layout}, only the \textbf{command byte} 
+is required in any case. The number of \textbf{payload data bytes} that are 
+expected depends on the command byte.
+
+Figure \ref{command bytes} lists a few common \textbf{command bytes}.
+
+\begin{figure}[htbp] \begin{center}
+\begin{tabular}{l|l}
+Command Byte & Meaning \\
+\hline
+0x00 & IDLE \\
+0x01 & RESET \\
+0x02 & START TALKING \\
+0x03 & STOP TALKING \\
+0x04 & dump keymatrix map \\
+0x05 & dump analog map \\
+0x06 & I2C send \\
+0x07 & DOA send \\
+0x08 & DOB send \\
+\end{tabular}
+\caption{common command bytes}
+\label{command bytes}
+\end{center} \end{figure}
+
+For this document, we will only concern ourselves with 
+\textbf{DOA send} (command byte 0x07\footnote{The 0xnn notation is used here 
+as in the C programming language. It refers to numbers in the hexadecimal system.}).
+
+
+\section{The DOA Command Packet}
+
+The \textbf{DOA Command Packet} consists of the \textbf{DOA send command byte} 
+and three bytes as payload:
+
+
+When PHCC receives a \textbf{DOA send command byte}, it expects three bytes to
+follow the \textbf{command bytes}. See figure \ref{doa send}.
+
+\begin{figure}[h] \begin{center}
+\setlength{\byteheight}{6ex}
+\setlength{\bitwidth}{1cm}
+\begin{bytefield}{8}
+\wordbox{1}{command byte} \\
+\wordbox{1}{device address (devaddr)} \\
+\wordbox{1}{subdevice address (subaddr)} \\
+\wordbox{1}{DOA data byte}
+\end{bytefield}
+\caption{DOA Command Packet Layout}
+\label{doa send}
+\end{center} \end{figure}
+
+
+\subsection{Device Address}
+
+The device address (or \textbf{devaddr}) is a 8bit value to address 
+individual DOA boards. In most cases, each DOA board will have a unique
+\textbf{devaddr}. When the firmware for a particular DOA daughterboard 
+is compiled or assembled (using a C compiler or PIC assembler) this address
+is set\footnote{usually via a \texttt{\#define}}. The 8bit width means that 
+256 DOA daughterboards could be theoretically addressed.
+
+In certain cases, a single DOA daughterboard might require more than 
+one \textbf{devaddr}, for example when the number of subaddresses is not 
+sufficient or in case of other special requirements.
+
+\subsection{Subdevice Address}
+
+The subdevice address or subaddress (or \textbf{subaddr}) is a 6bit value
+to address certain functions on a particular DOA daughterboard. Note that while
+this is a 6bit value, the smallest unit that can be transferred via the serial port 
+is a byte (8bit). This means that when the host sends a \textbf{subaddr} to PHCC,
+it will be the size of a byte, with the two most significant bits unset. 
+PHCC ignores the value of those two bits.
+
+The size of the \textbf{subaddr} might change in the future, depending on needs.
+
+The interpretation of a \textbf{subaddr} depends on the type of DOA daughterboard
+and possibly also firmware version. Further below (see subaddress maps, starting 
+figure \ref{subaddr map 40do})
+is a list of subaddresses and their meaning for certain board firmware versions.
+
+
+\subsection{DOA Data Byte}
+
+The \textbf{data byte} is a 8bit (well of course, its a byte) value whose meaning is 
+determined by the firmware of the receiving daughterboard in combination with 
+the \textbf{subaddr}
+
+Detailed information is presented in the subadress maps section.
+
+
+\section{Subaddress Maps}
+
+The following figures show maps for individual DOA daughterboards.
+The subaddr is given in hexadecimal format along with the meaning
+of each particular subaddr.
+
+
+\subsection{Subaddress Map for Daughterboard PHCC\_DOA\_40DO}
+
+The valid subaddresses for the 40DO board are shown in figure \ref{subaddr map 40do}.
+The 40 outputs are bit-mapped onto the subaddresses. Each byte contains 8bits, 
+so each subaddr corresponds to 8 outputs.
+
+\begin{figure}[ht] \begin{center}
+\setlength{\byteheight}{4ex}
+\setlength{\bitwidth}{0.25cm}
+\begin{bytefield}{32}
+\bitbox[]{8}{Subaddr} & \bitbox[]{24}{Description} \\
+\bitbox[]{8}{\texttt{0x00}} & \bitbox{24}{outputs 1-8} \\
+\bitbox[]{8}{\texttt{0x01}} & \bitbox{24}{outputs 9-16} \\
+\bitbox[]{8}{\texttt{0x02}} & \bitbox{24}{outputs 17-24} \\
+\bitbox[]{8}{\texttt{0x03}} & \bitbox{24}{outputs 25-32} \\
+\bitbox[]{8}{\texttt{0x04}} & \bitbox{24}{outputs 33-40} \\
+\end{bytefield}
+\caption{Subaddr Map for daughterboard DOA\_40DO}
+\label{subaddr map 40do}
+\end{center} \end{figure}
+
+
+
+\subsection{Subaddress Map for Daughterboard PHCC\_DOA\_7seg}
+
+The valid subaddresses for the LED/7segment display driver board DOA\_7seg
+are shown in figure \ref{subaddr map 7seg}.
+Up to 32 displays can be controlled with one board, so 32 subaddresses are
+needed for direct control, one for each display. Most 7-segment displays
+actually have 8 LEDs embedded (7 segments and the decimal point) which suits
+us well as each byte also consists of 8 bits. This board allows direct control
+of all segments (as well as the decimal point), so no BCD or other conversion 
+is done on the incoming data. It is the host's responsibility to ,,encode'' the
+data eg. to display numbers 0-9 via the 7 segments. This also give the user 
+freedom in wiring of the segmented displays. Instead of (or in addition to)
+the 7-segment displays, individual LEDs can also be used. In this case, it is necessary
+to connect the cathodes of every block of eight LEDs together to form a common cathode
+(if the board is used in common cathode configuration, otherwise connect the anodes together).
+
+The board has two sets of 16 displays grouped together as a ,,channel''. 
+The purpose of these channels is to group the commons together. This means that the common
+return of display 1 (on channel A) is connected to the first display of channel B, 
+namely display 17.
+
+
+\begin{figure}[ht] \begin{center}
+\setlength{\byteheight}{3ex}
+\setlength{\bitwidth}{0.25cm}
+\begin{bytefield}{24}
+\bitbox[]{8}{Subaddr} & \bitbox[]{24}{Description} \\
+\wordgroupr{Displays 1-16 \\ on Channel A}
+\bitbox[]{8}{\texttt{0x00}} & \bitbox{24}{display 1} \\
+\bitbox[]{8}{\texttt{0x01}} & \bitbox{24}{display 2} \\
+\bitbox[]{8}{\texttt{0x02}} & \bitbox{24}{display 3} \\
+\bitbox[]{8}{\texttt{0x03}} & \bitbox{24}{display 4} \\
+\bitbox[]{8}{\texttt{0x04}} & \bitbox{24}{display 5} \\
+\bitbox[]{8}{\texttt{0x05}} & \bitbox{24}{display 6} \\
+\bitbox[]{8}{\texttt{0x06}} & \bitbox{24}{display 7} \\
+\bitbox[]{8}{\texttt{0x07}} & \bitbox{24}{display 8} \\
+\bitbox[]{8}{\texttt{0x08}} & \bitbox{24}{display 9} \\
+\bitbox[]{8}{\texttt{0x09}} & \bitbox{24}{display 10} \\
+\bitbox[]{8}{\texttt{0x0A}} & \bitbox{24}{display 11} \\
+\bitbox[]{8}{\texttt{0x0B}} & \bitbox{24}{display 12} \\
+\bitbox[]{8}{\texttt{0x0C}} & \bitbox{24}{display 13} \\
+\bitbox[]{8}{\texttt{0x0D}} & \bitbox{24}{display 14} \\
+\bitbox[]{8}{\texttt{0x0E}} & \bitbox{24}{display 15} \\
+\bitbox[]{8}{\texttt{0x0F}} & \bitbox{24}{display 16} 
+\endwordgroupr \\
+\wordgroupr{Displays 17-32 \\ on Channel B}
+\bitbox[]{8}{\texttt{0x10}} & \bitbox{24}{display 17} \\
+\bitbox[]{8}{\texttt{0x11}} & \bitbox{24}{display 18} \\
+\bitbox[]{8}{\texttt{0x12}} & \bitbox{24}{display 19} \\
+\bitbox[]{8}{\texttt{0x13}} & \bitbox{24}{display 20} \\
+\bitbox[]{8}{\texttt{0x14}} & \bitbox{24}{display 21} \\
+\bitbox[]{8}{\texttt{0x15}} & \bitbox{24}{display 22} \\
+\bitbox[]{8}{\texttt{0x16}} & \bitbox{24}{display 23} \\
+\bitbox[]{8}{\texttt{0x17}} & \bitbox{24}{display 24} \\
+\bitbox[]{8}{\texttt{0x18}} & \bitbox{24}{display 25} \\
+\bitbox[]{8}{\texttt{0x19}} & \bitbox{24}{display 26} \\
+\bitbox[]{8}{\texttt{0x1A}} & \bitbox{24}{display 27} \\
+\bitbox[]{8}{\texttt{0x1B}} & \bitbox{24}{display 28} \\
+\bitbox[]{8}{\texttt{0x1C}} & \bitbox{24}{display 29} \\
+\bitbox[]{8}{\texttt{0x1D}} & \bitbox{24}{display 30} \\
+\bitbox[]{8}{\texttt{0x1E}} & \bitbox{24}{display 31} \\
+\bitbox[]{8}{\texttt{0x1F}} & \bitbox{24}{display 32} 
+\endwordgroupr \\
+\end{bytefield}
+\caption{Subaddr Map for daughterboard DOA\_7seg}
+\label{subaddr map 7seg}
+\end{center} \end{figure}
+
+
+
+\subsection{Subaddress Map for Daughterboard PHCC\_DOA\_8servo}
+
+The valid subaddresses for the servo driver board DOA\_8servo
+are shown in figure \ref{subaddr map servo}.
+To control these 8 RC-type servos, there are subadresses for 
+position and calibration.
+The position is a 8bit value, so 256 different positions are possible
+for each servo.
+Each servo can be calibrated for movement range and for offset 
+on one side of the movement range.
+The offset calibration value is 16bits, so two subadresses are
+needed for each servo.
+The movement range calibration value (also called ,,gain'') is a 8bit value.
+The best strategy for calibration is to set the offset value first, and then 
+the gain.
+
+
+\begin{figure}[ht] \begin{center}
+\setlength{\byteheight}{3ex}
+\setlength{\bitwidth}{0.4cm}
+\begin{bytefield}{24}
+\bitbox[]{8}{Subaddr} & \bitbox[]{24}{Description} \\
+\wordgroupr{Servo Positions}
+\bitbox[]{8}{\texttt{0x00}} & \bitbox{24}{servo 1} \\
+\bitbox[]{8}{\texttt{0x01}} & \bitbox{24}{servo 2} \\
+\bitbox[]{8}{\texttt{0x02}} & \bitbox{24}{servo 3} \\
+\bitbox[]{8}{\texttt{0x03}} & \bitbox{24}{servo 4} \\
+\bitbox[]{8}{\texttt{0x04}} & \bitbox{24}{servo 5} \\
+\bitbox[]{8}{\texttt{0x05}} & \bitbox{24}{servo 6} \\
+\bitbox[]{8}{\texttt{0x06}} & \bitbox{24}{servo 7} \\
+\bitbox[]{8}{\texttt{0x07}} & \bitbox{24}{servo 8} 
+\endwordgroupr \\
+\wordgroupr{Offset Calibration \\ value \\ (low byte)}
+\bitbox[]{8}{\texttt{0x08}} & \bitbox{24}{low byte of calibration offset for servo 1} \\
+\bitbox[]{8}{\texttt{0x09}} & \bitbox{24}{low byte of calibration offset for servo 2} \\
+\bitbox[]{8}{\texttt{0x0A}} & \bitbox{24}{low byte of calibration offset for servo 3} \\
+\bitbox[]{8}{\texttt{0x0B}} & \bitbox{24}{low byte of calibration offset for servo 4} \\
+\bitbox[]{8}{\texttt{0x0C}} & \bitbox{24}{low byte of calibration offset for servo 5} \\
+\bitbox[]{8}{\texttt{0x0D}} & \bitbox{24}{low byte of calibration offset for servo 6} \\
+\bitbox[]{8}{\texttt{0x0E}} & \bitbox{24}{low byte of calibration offset for servo 7} \\
+\bitbox[]{8}{\texttt{0x0F}} & \bitbox{24}{low byte of calibration offset for servo 8} 
+\endwordgroupr \\
+\wordgroupr{Offset Calibration \\ value \\ (high byte)}
+\bitbox[]{8}{\texttt{0x10}} & \bitbox{24}{high byte of calibration offset for servo 1} \\
+\bitbox[]{8}{\texttt{0x11}} & \bitbox{24}{high byte of calibration offset for servo 2} \\
+\bitbox[]{8}{\texttt{0x12}} & \bitbox{24}{high byte of calibration offset for servo 3} \\
+\bitbox[]{8}{\texttt{0x13}} & \bitbox{24}{high byte of calibration offset for servo 4} \\
+\bitbox[]{8}{\texttt{0x14}} & \bitbox{24}{high byte of calibration offset for servo 5} \\
+\bitbox[]{8}{\texttt{0x15}} & \bitbox{24}{high byte of calibration offset for servo 6} \\
+\bitbox[]{8}{\texttt{0x16}} & \bitbox{24}{high byte of calibration offset for servo 7} \\
+\bitbox[]{8}{\texttt{0x17}} & \bitbox{24}{high byte of calibration offset for servo 8} 
+\endwordgroupr \\
+\wordgroupr{Gain Calibration \\ value}
+\bitbox[]{8}{\texttt{0x18}} & \bitbox{24}{gain calibration value for servo 1} \\
+\bitbox[]{8}{\texttt{0x19}} & \bitbox{24}{gain calibration value for servo 2} \\
+\bitbox[]{8}{\texttt{0x1A}} & \bitbox{24}{gain calibration value for servo 3} \\
+\bitbox[]{8}{\texttt{0x1B}} & \bitbox{24}{gain calibration value for servo 4} \\
+\bitbox[]{8}{\texttt{0x1C}} & \bitbox{24}{gain calibration value for servo 5} \\
+\bitbox[]{8}{\texttt{0x1D}} & \bitbox{24}{gain calibration value for servo 6} \\
+\bitbox[]{8}{\texttt{0x1E}} & \bitbox{24}{gain calibration value for servo 7} \\
+\bitbox[]{8}{\texttt{0x1F}} & \bitbox{24}{gain calibration value for servo 8} 
+\endwordgroupr \\
+%\wordgroupr{(not implemented yet)}
+\bitbox[]{8}{\texttt{0x20}} & \bitbox[lrt]{24}{store calibration values to EEPROM} \\
+\bitbox[]{8}{} & \bitbox[lrb]{24}{(not implemented yet)}
+%\endwordgroupr \\
+\end{bytefield}
+\caption{Subaddr Map for daughterboard DOA\_8servo}
+\label{subaddr map servo}
+\end{center} \end{figure}
+
+
+\subsection{Subaddress Map for Daughterboard PHCC\_DOA\_AnOut1}
+
+The valid subaddresses for the servo driver board DOA\_AnOut1
+are shown in figure \ref{subaddr map anout1}.
+With the standard firmware, each channel has a resolution of 8bits.
+For non-standard firmware versions (eg. with higher resolution but
+less channels) this subaddr map is not correct.
+Note the \textbf{gain calibration value} at subaddr 0x10, which is 
+currently preset to 128 (decimal). Normally the gain shouln't 
+need adjustment and it might completely disappear completely in later
+firmware versions.
+
+\begin{figure}[ht] \begin{center}
+\setlength{\byteheight}{4ex}
+\setlength{\bitwidth}{0.25cm}
+\begin{bytefield}{32}
+\bitbox[]{8}{Subaddr} & \bitbox[]{24}{Description} \\
+\bitbox[]{8}{\texttt{0x00}} & \bitbox{24}{channel 1} \\
+\bitbox[]{8}{\texttt{0x01}} & \bitbox{24}{channel 2} \\
+\bitbox[]{8}{\texttt{0x02}} & \bitbox{24}{channel 3} \\
+\bitbox[]{8}{\texttt{0x03}} & \bitbox{24}{channel 4} \\
+\bitbox[]{8}{\texttt{0x04}} & \bitbox{24}{channel 5} \\
+\bitbox[]{8}{\texttt{0x05}} & \bitbox{24}{channel 6} \\
+\bitbox[]{8}{\texttt{0x06}} & \bitbox{24}{channel 7} \\
+\bitbox[]{8}{\texttt{0x07}} & \bitbox{24}{channel 8} \\
+\bitbox[]{8}{\texttt{0x08}} & \bitbox{24}{channel 9} \\
+\bitbox[]{8}{\texttt{0x09}} & \bitbox{24}{channel 10} \\
+\bitbox[]{8}{\texttt{0x0a}} & \bitbox{24}{channel 11} \\
+\bitbox[]{8}{\texttt{0x0b}} & \bitbox{24}{channel 12} \\
+\bitbox[]{8}{\texttt{0x0c}} & \bitbox{24}{channel 13} \\
+\bitbox[]{8}{\texttt{0x0d}} & \bitbox{24}{channel 14} \\
+\bitbox[]{8}{\texttt{0x0e}} & \bitbox{24}{channel 15} \\
+\bitbox[]{8}{\texttt{0x0f}} & \bitbox{24}{channel 16} \\
+\bitbox[]{8}{\texttt{0x10}} & \bitbox[lrt]{24}{gain calibration value} \\
+\bitbox[]{8}{} & \bitbox[lrb]{24}{for all channels}
+\end{bytefield}
+\caption{Subaddr Map for daughterboard DOA\_AnOut1}
+\label{subaddr map anout1}
+\end{center} \end{figure}
+
+
+\subsection{Subaddress Map for Daughterboard PHCC\_DOA\_char\_lcd}
+
+TBD.
+Standard (generic) firmware:
+Here, the subaddr is divided into several fields, namely
+* display number (0-7): 3bit, contained in the lower 3 bits (bits 0-2)
+* display data/control data 0/1: 1bit, contained in bit 333 
+  display data=0, control data=1
+
+The lcd firmware buffers the incoming data/commands in a circular buffer.
+This buffer can hold up to 128 data/command sequences
+
+
+\subsection{Subaddress Map for Daughterboard PHCC\_DOA\_stepper\_293}
+
+TBD.
+
+
+\end{document}
