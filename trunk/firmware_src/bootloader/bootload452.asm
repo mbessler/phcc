@@ -46,7 +46,7 @@
 ;;  
 ;;  However, my changes and comments are available under:
 ;;
-;; Copyright (c) 2003 by Manuel Bessler <m.bessler AT gmx.net>
+;; Copyright (c) 2003-2005 by Manuel Bessler <m.bessler AT gmx.net>
 ;; 
 ;;  The full text of the legal notices is contained in the file called
 ;;  COPYING, included with this distribution.
@@ -69,32 +69,68 @@
 
 ;;=================================================
 ;; Circuit setup:
-;;
+;;   two LEDs on RB7 (one to GND, one to Vcc)
 ;; 
 ;; Program layout:
 ;;
-;;
+;; Changes:
+;;    20050118  LED blink seq.
+;;    20050429  (real-)bootblock write protect
 ;;=================================================
 
-        LIST P=18F452, R=DEC    ; what the PIC we use, decimal system as default
-        #include "p18f452.inc"  ; include appropriate processor definitions
+;;;;; uncomment the processor you use
+;;		LIST P=18F442, R=DEC    ; what the PIC we use, decimal system as default
+		LIST P=18F452, R=DEC    ; what the PIC we use, decimal system as default
+
+;;;;;;; if you want the bootblock (first 512 bytes of program mem) to be write protected, define BOOTLDR_WRPROT
+#define BOOTLDR_WRPROT
 
 ;;;; @40Mhz (10MHz x 4)
 
+	IFDEF __18F452
+        #include "p18f452.inc"  ; include appropriate processor definitions
 		; set config bits:
 		__CONFIG  _CONFIG1H, _OSCS_OFF_1H & _HSPLL_OSC_1H  ;;; _HS_OSC_1H
 		__CONFIG  _CONFIG2L, _PWRT_ON_2L & _BOR_ON_2L & _BORV_20_2L
 		__CONFIG  _CONFIG2H, _WDT_OFF_2H & _WDTPS_32_2H
 		__CONFIG  _CONFIG3H, _CCP2MX_OFF_3H
 		__CONFIG  _CONFIG4L, _STVR_ON_4L & _LVP_OFF_4L & _DEBUG_OFF_4L
-
 		__CONFIG  _CONFIG5L, _CP0_OFF_5L & _CP1_OFF_5L & _CP2_OFF_5L & _CP3_OFF_5L
 		__CONFIG  _CONFIG5H, _CPB_OFF_5H & _CPD_OFF_5H
+
 		__CONFIG  _CONFIG6L, _WRT0_OFF_6L & _WRT1_OFF_6L & _WRT2_OFF_6L & _WRT3_OFF_6L
+#ifdef BOOTLDR_WRPROT
+		__CONFIG  _CONFIG6H, _WRTC_OFF_6H & _WRTB_ON_6H & _WRTD_OFF_6H
+#else
 		__CONFIG  _CONFIG6H, _WRTC_OFF_6H & _WRTB_OFF_6H & _WRTD_OFF_6H
+#endif  ;; BOOTLDR_WRPROT
+
+		
 		__CONFIG  _CONFIG7L, _EBTR0_OFF_7L & _EBTR1_OFF_7L & _EBTR2_OFF_7L & _EBTR3_OFF_7L
 		__CONFIG  _CONFIG7H, _EBTRB_OFF_7H
 
+	ENDIF
+
+	IFDEF __18F442
+        #include "p18f442.inc"  ; include appropriate processor definitions
+		; set config bits:
+		__CONFIG  _CONFIG1H, _OSCS_OFF_1H & _HSPLL_OSC_1H  ;;; _HS_OSC_1H
+		__CONFIG  _CONFIG2L, _PWRT_ON_2L & _BOR_ON_2L & _BORV_20_2L
+		__CONFIG  _CONFIG2H, _WDT_OFF_2H & _WDTPS_32_2H
+		__CONFIG  _CONFIG3H, _CCP2MX_OFF_3H
+		__CONFIG  _CONFIG4L, _STVR_ON_4L & _LVP_OFF_4L & _DEBUG_OFF_4L
+		__CONFIG  _CONFIG5L, _CP0_OFF_5L & _CP1_OFF_5L & _CP2_OFF_5L & _CP3_OFF_5L
+		__CONFIG  _CONFIG5H, _CPB_OFF_5H & _CPD_OFF_5H
+		__CONFIG  _CONFIG6L, _WRT0_OFF_6L & _WRT1_OFF_6L & _WRT2_OFF_6L & _WRT3_OFF_6L
+#ifdef BOOTLDR_WRPROT
+		__CONFIG  _CONFIG6H, _WRTC_OFF_6H & _WRTB_ON_6H & _WRTD_OFF_6H
+#else
+		__CONFIG  _CONFIG6H, _WRTC_OFF_6H & _WRTB_OFF_6H & _WRTD_OFF_6H
+#endif  ;; BOOTLDR_WRPROT
+		__CONFIG  _CONFIG7L, _EBTR0_OFF_7L & _EBTR1_OFF_7L & _EBTR2_OFF_7L & _EBTR3_OFF_7L
+		__CONFIG  _CONFIG7H, _EBTRB_OFF_7H
+
+	ENDIF
 
 ;;		ERRORLEVEL -302			; disable 302 assembler warning messages
 
@@ -104,6 +140,10 @@
 
 #define MAJOR_VERSION 0
 #define MINOR_VERSION 1
+
+#define LED				PORTB, 7
+#define LED_TRIS		TRISB, 7
+
 
 #define STX 0x0F
 #define ETX 0x04
@@ -159,17 +199,14 @@
 ;;-------------------------------
 init:
 		;;use RB<0:3> for debugging with LEDs in the 74HCT154 socket
-		MOVLW	b'00000000'
-		MOVWF	TRISB
-		MOVLW	0xff
-		MOVWF	PORTB		; all leds on test
+		BCF		LED_TRIS			; LED pin is output
+		BCF		LED					; LED off
 		;; SETtting a bit in the TRISx registers -> input
 		;; CLEARing a bit in the TRISx registers -> output
 
 ;;-------------------------------
 ;; application specific initialization
 ;;-------------------------------
-;;		BCF		TRISB, 7		; TestLED
 		MOVLW	5
 		MOVWF	secondstowait	; set secondstowait to 5 secons for timer interrupts
 
@@ -207,8 +244,6 @@ waitforhost:
 		RCALL	rs232_recv_with_timeout
 					; if rs232_recv returns, we have received something. 
 					; then disable interrupts and prepare to receive new userprogram
-		MOVLW	0x00
-		MOVWF	PORTB		; all leds off test end
 	
 ; Frame Format
 ;
@@ -259,8 +294,6 @@ check_checksum:
 
 ;; do the common read/write setup
 
-		BSF		PORTB, 0		;; LED
-
 		MOVF	adr_l, W			; move adr_l
 		MOVWF	TBLPTRL				; to TBLPTR low (for ops on program memory)
 		MOVWF	EEADR				; and to EEADR  (for ops on eeprom data memory)
@@ -278,16 +311,12 @@ check_checksum:
 		RESET						; then it must have been a reset packet <STX><STX>[<any><0x00>]<CHKSUM><ETX>
 ;;;;;;;;;		BRA		startpacket			; then it was an invalid packet
 
-		BSF		PORTB, 1		;; LED
-
 
 		; check what command was requested from host
 		MOVF	cmd, W				; load command into W
 		SUBLW	7					; to check if its within the range of valid commands
 		BNC		startpacket			; if it wasn't, start over
 
-
-		BSF		PORTB, 7		;; LED
 
 		; now we set up a jumptable based on the command code
 		CLRF	PCLATH
@@ -465,6 +494,7 @@ reinit_timer0:
 		MOVLW	0x96
 		MOVWF	TMR0L				; TMR0L should come after TMR0H (see datasheet)
 		BCF		INTCON, TMR0IF		; clear Timer0 interrupt flag
+		BTG		LED_TRIS			; toggle LED in/output. this will toggle between: "both LEDs on"/"only red LED on"
 		RETURN
 
 
@@ -500,6 +530,9 @@ receiveoverrun_to:
 		RETURN
 
 bootuserprogram:
+		; LED pin to output, off
+		BCF		LED_TRIS			; LED pin is output
+		BCF		LED					; green LED off, red LED on
 		; adjust stack
 		CLRF	STKPTR				; clear stackpointer, leaving an empty stack ready for user program
 		; hand control over to userprogram
