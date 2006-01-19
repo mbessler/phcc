@@ -11,12 +11,12 @@
 ;;  and therefore is Open Source, available as Free Software.
 ;;
 ;;
-;; part of cockpit.varxec.de, a home cockpit building site dedicated to
-;; free software and the open source/free software, multiplatform
-;; flight simulator FlightGear.
+;; part of cockpit.varxec.net, a home cockpit building site dedicated
+;; to the free software and the open source/free software, 
+;; multiplatform flight simulator FlightGear.
 ;;
 ;;
-;; Copyright (c) 2003, 2004 by Manuel Bessler <m.bessler AT gmx DOT net>
+;; Copyright (c) 2003, 2004, 2005 by Manuel Bessler <m.bessler AT gmx DOT net>
 ;; 
 ;;  The full text of the legal notices is contained in the file called
 ;;  COPYING, included with this distribution.
@@ -42,8 +42,8 @@
 ;;   see http://cockpit.varxec.net/electronic/PHCC.html
 ;; 
 ;; Program layout:
-;;	FSR0 is used for keymatrix buffer
-;;  FSR1 is used for send/receive buffer
+;;	FSR0 is used for DOA buffer, for RS232 send/receive buffer, ...
+;; 	FSR1 is used for keymatrix buffer stuff
 ;;  FSR2 is used for analog in buffer stuff
 ;;
 ;;=================================================
@@ -54,6 +54,11 @@
 ;;;; @40Mhz (10MHz x 4)
 
 ;;; #define REV3_BOARD			;; define the board/hardware revision you have
+
+#define MAJOR_VERSION 0
+#define MINOR_VERSION 1
+#define MICRO_VERSION 7
+
 
 #define FREQTIMESFOUR 10    ;; for delays, specifies the multiple of 4 MHz we're running at.
 							;;  eg. for 16MHz this would be 4, for 40MHz it would be 10
@@ -68,18 +73,18 @@
 #define CTSTRIS			TRISC, 2		;; direction register for CTS
 
 
-#define	DO_A_CLK 		PORTC, 1		;; Digital-Out Type A Clock line
-#define DO_A_DATA 		PORTC, 0		;; Digital-Out Type A Data line
-#define	DO_A_CLK_TRIS 	TRISC, 1		;; direction register setup
-#define	DO_A_DATA_TRIS 	TRISC, 0		;; direction register setup
+#define	DOA_CLK 		PORTC, 1		;; Digital-Out Type A Clock line
+#define DOA_DATA 		PORTC, 0		;; Digital-Out Type A Data line
+#define	DOA_CLK_TRIS 	TRISC, 1		;; direction register setup
+#define	DOA_DATA_TRIS 	TRISC, 0		;; direction register setup
 
 
-#define DO_B_CLK        PORTB, 5		;; Digital-Out Type B Clock line
-#define DO_B_DATA       PORTB, 4		;; Digital-Out Type B Data line
-#define DO_B_STO        PORTB, 6		;; Digital-Out Type B Store line
-#define DO_B_CLK_TRIS   TRISB, 5		;; direction register setup
-#define DO_B_DATA_TRIS  TRISB, 4		;; direction register setup
-#define DO_B_STO_TRIS   TRISB, 6		;; direction register setup
+#define DOB_CLK        PORTB, 5			;; Digital-Out Type B Clock line
+#define DOB_DATA       PORTB, 4			;; Digital-Out Type B Data line
+#define DOB_STO        PORTB, 6			;; Digital-Out Type B Store line
+#define DOB_CLK_TRIS   TRISB, 5			;; direction register setup
+#define DOB_DATA_TRIS  TRISB, 4			;; direction register setup
+#define DOB_STO_TRIS   TRISB, 6			;; direction register setup
 
 
 #define ANP1 			PORTA, 5		;; AN4
@@ -87,6 +92,11 @@
 #define ANP3 			PORTA, 2		;; AN2
 #define AN4067A 		PORTA, 0		;; AN0
 #define AN4067B 		PORTA, 1		;; AN1
+
+#define ADR0_154_TRIS	TRISB, 0		;; A0 of 74x154
+#define ADR1_154_TRIS	TRISB, 1		;; A1 of 74x154
+#define ADR2_154_TRIS	TRISB, 2		;; A2 of 74x154
+#define ADR3_154_TRIS	TRISB, 3		;; A3 of 74x154
 
 #define ADR0 			PORTA, 4		;; 4-bit address to 
 #define ADR1 			PORTE, 0		;; the two 4067s  and 
@@ -96,6 +106,8 @@
 #define KEYMATRIX_IN_PORT PORTD		;; port to read in a row of the keymatrix
 #define KEYMATRIX_IN_DIRREG	TRISD	;; direction register for above port
 
+#define LED				PORTB, 7
+#define LED_TRIS		TRISB, 7
 
 #define DOA_BITTIMING_US	500			;; bitlength in microseconds 
 
@@ -114,7 +126,10 @@
 #define HOSTCMD_I2CSEND					0x06
 #define HOSTCMD_DOASEND					0x07
 #define HOSTCMD_DOBSEND					0x08
-#define	MAXCMD						0x08		; always the last/highest value of HOSTCMD_...
+; ...
+#define HOSTCMD_IDENT					0x20	; space char
+#define HOSTCMD_TEST					0x21	; exclamation mark for tests via terminal program
+#define	MAXCMD						0x021		; always the last/highest value of HOSTCMD_...
 
 ;;; for receive state machine
 #define RECVSTATE_IDLE					0x00
@@ -134,29 +149,59 @@
 
 #define BANK_global 0x0
 		CBLOCK 0x0					;; 0x0 - 0x80 is part of the accessbank
-			Wsave, BSRsave, STATUSsave
-			delaycounter_freq
-			delaycounter_inner,delaycounter_outer
-delaycounterdoa
-			overrunflag
+			;; ** ISR shadow variables **
+			Wsave, BSRsave, STATUSsave, fsr0l_save, fsr0h_save
 
-			tmpFIFO, FIFOrdy
+			;; ** global variables and flags **
+			talk, gie_flag
+			
+		
+			;; ** delay variables **
+			delaycounter_freq, delaycounter_inner,delaycounter_outer
+		
+			;; ** RS232 variables **
+			overrunflag
 			inFIFO232first, inFIFO232last
 			outFIFO232first, outFIFO232last
 			recv_byte
 			recv_state
-			talk, gie_flag, an_changed
+			tmpFIFO, FIFOrdy
+			fsr0l_232, fsr0h_232
 
-			keyinput_old, keyinput_new, keyinput_delta, col_addr
+			;; ** DOA variables **
+			DOAfirst, DOAlast, DOArdy, DOAshiftout, packetbitcntr
+			doa_devaddrIN, doa_subaddrIN, doa_dataIN
 			doa_devaddr, doa_subaddr, doa_data
+
+			;; ** DOB variables **
 			dob_addr, dob_data
-			i2cout_addr, i2cout_subaddr, i2cout_data
+			DOBcounter
+
+			;; ** analog-in  variables **
+			an_changed
 			anbufH, anbufL, an_addr
-			
-			tmp, tmp2, antmp, keytmp
-			counter, counter2, counterkmx, counteran, ledcounter
+			anpctr
+			counteran
+		
+			;; ** keymatrix-in variables **
+			keyinput_old, keyinput_new, keyinput_delta, col_addr
+			counterkmx, counterkmx2
+
+			;; ** I/O addressing variables **
 			adr4067
 			adr154
+
+			;; ** timer variables **
+			timer0acq, timer0conv
+			timer3L, timer3H
+				
+			;; ** I2C variables **
+			i2cout_addr, i2cout_subaddr, i2cout_data
+
+			;; **  variables **
+			;; **  variables **
+			;; **  variables **
+				tmp, tmp2, antmp, keytmp
 		ENDC
 
 #define BANK_analog 0x1
@@ -186,6 +231,13 @@ delaycounterdoa
 			outFIFO232:FIFOsize
 		ENDC		
 
+#define DOAbuffsize 85*3		;; should always be a multiple of 3 ??????
+#define BANK_doa_buff 0x5
+		CBLOCK 0x500				;; bank 5
+			DOAbuff:DOAbuffsize
+		ENDC
+
+		
 ;;-------------------------------
 ;; via bootloader remapped program start point/reset vector
 ;;-------------------------------
@@ -205,100 +257,6 @@ interrupt:
 		ORG		0x0218
 		RETFIE
 
-;;-------------------------------
-;; real program starts here
-;;-------------------------------
-init:
-		CLRF	BSR					; set bank select register to default
-		BCF		INTCON, GIE			; disable all interrupts that may be left over from bootloader
-
-		MOVLW	0x00
-		MOVWF	PORTB		; all leds off test end
-		;; SETtting a bit in the TRISx registers -> input
-		;; CLEARing a bit in the TRISx registers -> output
-
-		BCF		PORTB, 7		;; LED off
-		CALL		delay1sec
-		BSF		PORTB, 7		;; LED on
-		CALL		delay1sec
-		BCF		PORTB, 7		;; LED off
-		CALL		delay1sec
-		BSF		PORTB, 7		;; LED on
-		CALL		delay1sec
-
-		MOVLW	RECVSTATE_IDLE		; initialize state machine
-		MOVWF	recv_state			; variable state holds the current state of the state machine
-
-		CALL	setup_everything	; call the setup routines for the different subsystems
-
-		BSF		INTCON,	GIE			; GLOBALLY ENABLE INTERRUPTS
-	
-;;-------------------------------
-;; main loop start
-;;-------------------------------
-
-	CLRF	ledcounter
-main:
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		BCF		INTCON, GIE
-		CALL	rs232inFIFOprocess
-		BSF		INTCON, GIE
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		BCF		INTCON, GIE
-		CALL	rs232fifo2send
-		BSF		INTCON, GIE
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-		NOP
-;	DCFSNZ	ledcounter, F
-
-		NOP
-		NOP
-
-		BRA		main
-
-
-
-;;===============================
-;; main loop end
-;;===============================
-
-
 ;;===============================
 ;;       --== ISR ==--
 ;;  Interrupt Service Routine
@@ -308,32 +266,27 @@ isr:
 		MOVWF	Wsave
 		MOVFF	STATUS, STATUSsave
 		MOVFF	BSR, BSRsave
+		MOVFF	FSR0L, fsr0l_save
+		MOVFF	FSR0H, fsr0h_save
 		;; set up addressing to bank 0 for data memory
 
 		;; start interrupt processing
 		BTFSC	PIR1, RCIF			; was it a serial port receive int?
-		RCALL	rs232recv2fifo		; handle it
+		CALL	rs232recv2fifo		; handle it
 
-;;		BTFSC	PIR1, TMR1IF		 	; TODO: make sure that not only the IF is set but also the IntEnable bit
-;;		BRA		t1_overflow
+		BTFSC	PIR2, TMR3IF		; check timer3 interrupt flag
+		CALL	timer3int
 
-		BTFSC	INTCON, TMR0IF		; was it a timer0 overflow ?
-		RCALL	timer0_int
-
+		BTFSC	PIE1, TXIE			; is the usart send-done interrupt enabled ?
+		CALL	rs232TXint			; then call handler to see if something's to do
+		
 		BRA		end_interrupt		; non-handled interrupt? then go to end
 ;;;;;;;;;;;;;;;;;;;;
 
-
-;t1_overflow:	
-;;	BTG		PORTB, 7
-;		CLRF	TMR1H
-;		CLRF	TMR1L
-;		BCF		PIR1, TMR1IF		; clear int flag
-;		BRA		end_interrupt		; done, go to end of int
-
-
 end_interrupt:
 		;; restore addessing
+		MOVFF	fsr0l_save, FSR0L
+		MOVFF	fsr0h_save, FSR0H
 		MOVFF	BSRsave, BSR
 		MOVF	Wsave, W
 		MOVFF	STATUSsave, STATUS
@@ -342,160 +295,446 @@ end_interrupt:
 ;; --== ISR ==-- end
 ;;===============================
 
-timer0_int:
-	BTG		PORTB, 7
-		CALL	keymatrix_in            ; read in one column of the keymatrix
-		CALL   read_analog_pri1        ; read ANP1
-		CALL   read_analog_pri2        ; read ANP2
-		CALL   read_analog_pri3        ; read ANP3
-		CALL   read_analog_secA        ; read analog value of first 4067 
-		CALL   read_analog_secB        ; read analog value of second 4067 
-		CALL	inc_addr                        ; increment address to 4067 mux
 
-		MOVF    adr4067, W                      ; load adr4067 into W
-		ANDLW   b'00000111'                     ; mask out unused upper 5 bits
-		XORLW   0x00                            ; will eval to zero if inc_addr rolled lower 
-		BTFSC   STATUS, Z                       ; 3 bits of adr4067 over to zero
-		CALL   inc_154                         ; yes, then increment adr154            
+timer3int:
+		BTFSS	PIE2, TMR3IE		; is timer3 int enabled?
+		RETURN						; if no, return immediately
 
-		MOVLW	0x01
-		MOVWF	TMR0H
-		MOVLW	0x04				; 0x0104 equals about 1 sec
-		MOVWF	TMR0L				; TMR0L should come after TMR0H (see datasheet)
-		BCF		INTCON, TMR0IF		; clear Timer0 interrupt flag
+		;; do whatever this interrupt should do
+		CALL	DOAnextbitout
+		;; possible improvement:
+		;; ---------------------
+		;; we could implement a similar technique like with TXIF and rs232outFIFOprocess
+		;; here using the DOAbuff status, doanextbitout state, and timer3 interrupt enable.
+
+		MOVFF	timer3H, TMR3H		; reload value for TMR3H, has to be before TMR3L
+		MOVFF	timer3L, TMR3L		; reload value for TMR3L
+		BCF		PIR2, TMR3IF		; reset timer3 interrupt flag
+		RETURN
+
 		
-		RETURN
+rs232TXint:
+		BTFSS	PIR1, TXIF			; is the usart send register empty, ready for more ?
+		RETURN						; no, go back
 
+		BRA		rs232fifo2send		; take a byte from the queue and send it (if queue non-empty)
+		RETURN		
 
+;;///////////////////////////////////////////
+;;/////////////// PROGRAM INIT //////////////
+;;///////////////////////////////////////////
+init:
+		CLRF	BSR					; set bank select register to default
+		BCF		INTCON, GIE			; disable all interrupts that may be left over from bootloader
 
-;;--------------------------------
-;; rs232recv2fifo
-;;   gets called by ISR
-;;   puts received byte in buffer
-;;   adjusts buffer pointers
-;;--------------------------------
-rs232recv2fifo:
-		BSF		RTS					; RTS/CTS hardware handshake: NOT ready to receive while processing
-		LFSR	FSR1, inFIFO232		; pointer to buffer
-		MOVF	inFIFO232last, W	; last position
-		ADDWF	FSR1L, F			; is new position in buffer for received byte
-		MOVF	RCREG, W			; serially received byte -> W
-		MOVWF	INDF1				; store at last position
+		CALL	led_blink_seq
 
-		INCF	inFIFO232last, F	; point to new (empty) position
-		; check for wrap-around
-		MOVLW	FIFOsize-1			; buffersize -> for comparison
-		CPFSEQ	inFIFO232last		; compare F with W, skip if eqal
-		BRA		nowrap_inFIFOlast	; not equal, then move on
-		CLRF	inFIFO232last		; otherwise we need to adjust inFIFO232last
-nowrap_inFIFOlast:
-		BSF		FIFOrdy, 0			; set first bit in FIFOrdy => data avail for processing
-		; check for transmission errors
-		BTFSC	RCSTA,OERR			; overrun error ?
-		BRA		receiveoverrun
-		BRA		receive_done		; else done
-receiveoverrun:
-		BCF		RCSTA,CREN			; clear CREN to clear OERR flag
-		BSF		RCSTA,CREN			; set CREN to reenable continuous receive
-		BSF		overrunflag,0
-		MOVF	RCREG,W				; flush receive register
-receive_done:
-		BCF		RTS					; RTS/CTS hardware handshake: we're ready to receive
-		BCF		PIR1, RCIF			; clear int flag
-		RETURN
+		CALL	setup_everything	; call the setup routines for the different subsystems
 
-;;--------------------------------
-;; rs232inFIFOprocess
-;;   processes data in inFIFO232
-;;--------------------------------
-rs232inFIFOprocess:
-		; check if data is available
-		MOVF	inFIFO232first, W
-		CPFSEQ	inFIFO232last		; if( inFIFOfirst == inFIFOlast )
-		BRA		inFIFOproc_do		; not equal, then data is available for processing
-		BRA		inFIFOproc_done		; equal, the FIFO is empty, we can stop processing
-inFIFOproc_do:
-		; else process the byte		
-		LFSR	FSR1, inFIFO232
-		ADDWF	FSR1L, F			; inFIFOfirst + base address of inFIFO
-		MOVF	INDF1, W
-		MOVWF	recv_byte			; save received byte where it is expected by some routines
-		CALL	recvstatemachine	; let the statemachine decide what to do with the byte
-;;	CALL	send2host
-		INCF	inFIFO232first, F	; byte in buffer processed, move pointer to next
-		; check for wrap-around
-		MOVLW	FIFOsize-1			; buffersize -> for comparison
-		CPFSEQ	inFIFO232first		; compare F with W, skip if eqal
-		BRA		inFIFOproc_done		; not equal, then move on
-		CLRF	inFIFO232first		; otherwise we need to adjust inFIFO232first
-inFIFOproc_done:		
-		RETURN
+		BSF		INTCON,	GIE			; GLOBALLY ENABLE INTERRUPTS
 
+;;;--------------- INIT END -----------------
+		
+;;===========================================
+;;===========================================
+;;============= MAIN LOOP START =============
+;;===========================================
+;;===========================================
+main:
+		CALL	read_analog_secA
+		CALL			start_acq_timer
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		CALL			yield
+		CALL	analog_GO		; for secA
+		CALL			start_conv_timer
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL			yield
+		CALL	analog_DONE		; for secA
+		
+		CALL	inc_154
+		CALL	inc_adr4067
+		CALL	read_analog_secB
+		CALL			start_acq_timer
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		CALL			yield
+		CALL	analog_GO		; for secB
+		CALL			start_conv_timer
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL	inc_154
+		NOP
+		NOP
+		NOP
+		CALL	keymatrix_in
+		
+		CALL			yield
+		CALL	analog_DONE		; for secB
 
-;;--------------------------------
-;; send2host
-;;   user callable function to send
-;;   a byte to host
-;; does NOT actually send, just puts byte in buffer
-;;--------------------------------
-send2host:
-rs232_send:
-		BSF		gie_flag, 0			; save GIE bit
-		BTFSS	INTCON, GIE			; to differentiate if we were called from inside an interrupt handler
-		BCF		gie_flag, 0
-		BCF	INTCON, GIE				; disable interrupts
+		CALL	next_anp
+		CALL			start_acq_timer
+		CALL			yield
+		CALL	analog_GO
+		CALL			start_conv_timer
+		CALL			yield
+		CALL	analog_DONE
+		CALL	inc_154
+		CALL	inc_adr4067
 
-		MOVWF	tmpFIFO				; need to temporarily store byte
-		LFSR	FSR1, outFIFO232	; load base address for indirect adressing
-		MOVF	outFIFO232last, W	; last position
-		ADDWF	FSR1L, F			; is new position in buffer for received byte
-		MOVF	tmpFIFO, W			; get byte to send
-		MOVWF	INDF1				; put in buffer
-		INCF	outFIFO232last, F	; point to new (empty) position
-
-		BTFSC	gie_flag, 0			; were we called from outside an interrupt handler ?
-		BSF	INTCON, GIE				; yes, then re-enable interrupts
-
-		RETURN
-
-;;--------------------------------
-;; rs232fifo2send
-;;   gets called by ISR
-;;   sends out byte via RS-232 (if outFIFO232 not empty)
-;;   adjusts buffer pointers
-;;--------------------------------
-rs232fifo2send:
-		MOVF	outFIFO232first, W	; load pointer to first unsent byte in buffer
-		CPFSEQ	outFIFO232last		; check if( first unsent==last unsent) 
-		BRA		fifo2send_hostrdy	; not equal, that means we do have something to send
-		BRA		fifo2send_no		; they are equal, fifo empty, nothing to send
-
-fifo2send_hostrdy:
-		BTFSS	TXSTA,TRMT			; send shift register empty? (prev. send done?)
-		BRA		fifo2send_no		; no, not yet, maybe next cycle
-		BTFSC	CTS					; RTS/CTS hardware handshake: is the host ready?
-		BRA		fifo2send_no		; no, host not ready, maybe next time
-		; else (host IS ready):
-		LFSR	FSR1, outFIFO232	; load base address for indirect adressing
-		ADDWF	FSR1L, F			; compute position in buffer of byte to send
-		MOVF	INDF1, W			; get byte from buffer
-		MOVWF	TXREG				; and send it out via serial port
-
-		INCF	outFIFO232first, F	; adjust pointer to next byte in buffer
-		; check for overflow
-		MOVLW	0x00				; did the pointer wrap to zero ?
-		CPFSEQ	outFIFO232first		; if( outFIFOfirst == 0 )
-		BRA		fifo2send_done		; not zero, did not wrap around, then we're done
-		MOVLW	LOW(outFIFO232)		; yes, equal, take lower 8 bits and
-		MOVWF	outFIFO232first		; set to start pos of buffer (relative to memory page)
-
-fifo2send_done:
-fifo2send_no:
-		RETURN
-
+		BRA		main
 
 ;;===========================================
+;;===========================================
+;;============= MAIN LOOP END ===============
+;;===========================================
+;;===========================================
 
+
+
+		
+
+		
+
+;;===========================================
+;;===========================================
+;;===========================================
+;;===========================================
+;;===========================================
+;;===========================================
+;;===========================================
+;;===========================================
+
+
+
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** Analog Acquisition and Conversion Timers
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+start_acq_timer:
+		MOVFF	timer0acq, TMR0L	; load timer preload value for acquisition
+		BRA		start_timer_common
+;;- - - - - - - - - - - - - - - - 
+start_conv_timer:
+		MOVFF	timer0conv, TMR0L	; load timer preload value for conversion
+;;-  -  -  -  -  -  -  -  -  -  - 
+start_timer_common:
+		BCF		INTCON, TMR0IF		; clear interrupt flag
+		BSF		T0CON, TMR0ON		; turn timer0 on
+		RETURN
+;;--------------------------------
+yield:
+		CALL	rs232inFIFOprocess	; check fifo during wait for timer0 ("idle task", 
+									; called whenever we've got nothin' better to do)
+		BTFSS	INTCON, TMR0IF
+		BRA		yield
+		BCF		T0CON, TMR0ON		; turn timer0 off
+		BCF		INTCON, TMR0IF		; clear interrupt flag
+		RETURN
+;;;//////////////////////////////////////////////////////
+;;;// END of Analog Acquisition and Conversion Timers
+;;;//////////////////////////////////////////////////////
+
+
+
+
+		
+
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** Initialization and Setup Routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+;;============================================
+;; SETTING UP ALL SUBSYSTEMS
+;;============================================
+setup_everything:
+		CLRF	talk
+		CALL	init_recv_statemachine		
+		CALL	setup_ints
+		CALL	setup_rs232
+		CALL	setup_DOA
+		CALL	setup_DOB
+		CALL	setup_analog
+		CALL	setup_keymatrix
+		CALL	setup_t0
+		;CALL	setup_t3			timer3 setup embedded withing setup_DOA
+;		CALL	setup_i2c
+		RETURN
+;;--------------------------------
+setup_ints
+		CLRF	INTCON				; clear/disable all interrupts
+		BCF		RCON, IPEN			; no interrupt priorities
+		RETURN
+;;--------------------------------
+init_recv_statemachine:
+		MOVLW	RECVSTATE_IDLE		; initialize state machine
+		MOVWF	recv_state			; variable state holds the current state of the state machine
+		RETURN
+;;;//////////////////////////////////////////////////////
+;;;// END of Initialization and Setup Routines
+;;;//////////////////////////////////////////////////////
+
+
+
+
+
+
+		
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** Test Routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+led_blink_seq:
+		BCF		LED_TRIS		; LED pin is output
+		BCF		LED				;; LED off
+		CALL		delay1sec
+		BSF		LED				;; LED on
+		CALL		delay1sec
+		BCF		LED				;; LED off
+		CALL		delay1sec
+		BSF		LED				;; LED on
+		CALL		delay1sec
+		RETURN
+;;--------------------------------
+
+;;;//////////////////////////////////////////////////////
+;;;// END of 
+;;;//////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** Timer Routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+setup_t0:
+		CLRF	T0CON				; reset all flags for timer0
+		BCF		T0CON, TMR0ON		; turn timer0 off
+		BSF		T0CON, T08BIT		; configure as 8bit timer
+		BCF		T0CON, T0CS			; clock source select: internal
+		BCF		T0CON, T0SE			; source edge select bit: low-to-high
+		BSF		T0CON, PSA			; don't use the prescaler
+		BCF		T0CON, T0PS2		; T0PS<2:0> are prescaler select 
+		BCF		T0CON, T0PS1		; all three bits clear (000) 
+		BCF		T0CON, T0PS0		;  => 1:2 prescale (just to be safe, prescaler is not used here, see above)
+		
+		;; we use timer0 only for approximate timing for adc acquisition and conversion
+		;; no interrupt is used, just polling
+		;; two different values are required:
+		;; 13usec for acquisition
+		;; and 20usec for conversion
+		;; thus we keep two TMR0L initialization values
+		MOVLW	0x70				; 0x70 equals roughly 13usec
+		MOVWF	timer0acq
+		MOVLW	0x30				; 0x30 equals roughly 20usec
+		MOVWF	timer0conv
+		
+		BCF		INTCON, TMR0IE		; don't use interrupts for timer0
+		BCF		INTCON, TMR0IF		; and clear the interupt flag
+		
+		
+;dont		BSF		T0CON, TMR0ON		; turn timer0 on
+		RETURN
+;--------------------------------
+
+;;;//////////////////////////////////////////////////////
+;;;// END of Timer Routines
+;;;//////////////////////////////////////////////////////
+
+
+
+
+
+
+
+		
+
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** Host->PHCC Receive State Machine, Outer Part
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 recvstatemachine:
 		;; jumptable
 		MOVF	recv_state, W		; need temp copy of state
@@ -511,7 +750,7 @@ recvstatemachine:
 		BTFSC	STATUS, C
 		INCF	PCLATH, F
 		MOVWF	PCL
-		
+;;- - - - - - - - - - - - - - - - 
 statejmptbl:
 		BRA		process_hostcmd		; RECVSTATE_IDLE processes the received byte from serial port to determine next state
 		BRA		state_reset1		; RECVSTATE_RESET1
@@ -531,9 +770,108 @@ statejmptbl:
 		RETURN
 		RETURN
 		RETURN
+;;--------------------------------
+state_reset1:
+		MOVF	recv_byte, W		; load copy of received byte
+		XORLW	HOSTCMD_RESET		; did we receive another reset (#2)
+		BZ		reset2				; zero flag set if command was reset
+		MOVLW	RECVSTATE_IDLE		; else (no reset): go back to idle
+		MOVWF	recv_state
+		RETURN
+reset2:
+		MOVLW	RECVSTATE_RESET2
+		MOVWF	recv_state
+		RETURN
+;;--------------------------------
+state_reset2:
+		MOVLW	RECVSTATE_IDLE		; next state will be idle, independent of received byte
+		MOVWF	recv_state
+		MOVF	recv_byte, W		; load copy of received byte
+		XORLW	HOSTCMD_RESET		; did we receive another reset (#3)
+		BTFSC	STATUS, Z			; zero flag set if command was reset
+		RESET						; then reset the PIC, which should invoke the bootloader
+		RETURN						; else return
+;;--------------------------------
+state_doasend1:
+		MOVLW	RECVSTATE_DOASEND2	; transition to next state
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	doa_devaddrIN		; put byte into appropriate place
+		RETURN						; done
+;;--------------------------------
+state_doasend2:
+		MOVLW	RECVSTATE_DOASEND3	; transition to next state
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	doa_subaddrIN		; put byte into appropriate place
+		RETURN						; done
+;;--------------------------------
+state_doasend3:
+		MOVLW	RECVSTATE_IDLE		; transition to idle
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	doa_dataIN			; put byte into appropriate place
+		BRA		DOAbuff_in			; enqueue DOA packet into DOAbuff (it also RETURNs for us
+		RETURN						; done (fall-thru in this case only)
+;;--------------------------------
+state_dobsend1:
+		MOVLW	RECVSTATE_DOBSEND2	; transition to next state
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	dob_addr			; put byte into appropriate place
+		RETURN						; done
+;;--------------------------------
+state_dobsend2:
+		MOVLW	RECVSTATE_IDLE		; transition to idle
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	dob_data			; put byte into appropriate place
+		CALL	send_DOB			; data complete, call handler
+		RETURN						; done
+;;--------------------------------
+state_i2csend1:
+		MOVLW	RECVSTATE_I2CSEND2	; transition to next state
+		MOVWF	recv_state			; save to state variable
+		RETURN						; done
+;;--------------------------------
+state_i2csend2:
+		MOVLW	RECVSTATE_I2CSEND3	; transition to next state
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	i2cout_addr			; put byte into appropriate place
+		RETURN						; done
+;;--------------------------------
+state_i2csend3:
+		MOVLW	RECVSTATE_I2CSEND4	; transition to next state
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	i2cout_subaddr		; put byte into appropriate place
+		RETURN						; done
+;;--------------------------------
+state_i2csend4:
+		MOVLW	RECVSTATE_IDLE		; transition to idle
+		MOVWF	recv_state			; save to state variable
+		MOVF	recv_byte, W		; get received byte
+		MOVWF	i2cout_data			; put byte into appropriate place
+;;;		CALL	send_i2c			; data complete, call handler
+		RETURN						; done
+;;;//////////////////////////////////////////////////////
+;;;// END of Host->PHCC Receive State Machine, Outer Part
+;;;//////////////////////////////////////////////////////
 
 
 
+
+
+
+
+		
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** Host->PHCC Receive State Machine, Inner Part
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 process_hostcmd:
 		MOVF	recv_byte, W		; check if byte received is in 
 		SUBLW	MAXCMD				; valid range for hostcmds by doing W=MAXCMD-recv_byte
@@ -551,7 +889,7 @@ process_hostcmd:
 		BTFSC	STATUS, C			; did add set carry
 		INCF	PCLATH, F			; possibly adjust high byte of program counter
 		MOVWF	PCL					; make the jump
-
+;;- - - - - - - - - - - - - - - - 
 hostcmd_jmptbl:
 		RETURN						; HOSTCMD_IDLE   do nothing
 		BRA		hostcmd_reset		; HOSTCMD_RESET  need total of 3 reset commands to reset, handled by state machine
@@ -562,54 +900,114 @@ hostcmd_jmptbl:
 		RETURN						; HOSTCMD_I2CSEND
 		BRA		hostcmd_doasend		; HOSTCMD_DOASEND
 		BRA		hostcmd_dobsend		; HOSTCMD_DOBSEND
+		RETURN						; 0x09
+		RETURN						; 0x0a
+		RETURN						; 0x0b
+		RETURN						; 0x0c
+		RETURN						; 0x0d
+		RETURN						; 0x0e
+		RETURN						; 0x0f
+		RETURN						; 0x10
+		RETURN						; 0x11
+		RETURN						; 0x12
+		RETURN						; 0x13
+		RETURN						; 0x14
+		RETURN						; 0x15
+		RETURN						; 0x16
+		RETURN						; 0x17
+		RETURN						; 0x18
+		RETURN						; 0x19
+		RETURN						; 0x1a
+		RETURN						; 0x1b
+		RETURN						; 0x1c
+		RETURN						; 0x1d
+		RETURN						; 0x1e
+		RETURN						; 0x1f
+		BRA		hostcmd_ident		; 0x20
+		BRA		hostcmd_test		; 0x21
 		RETURN
 		RETURN
-
-;;;;;;;;;;;;;;;; hostcommands further handling
+;;--------------------------------
+hostcmd_outofrange:
+		MOVLW	0x00				; just to be sure set
+		MOVWF	recv_byte			; receive byte to zero
+		RETURN	
+;;--------------------------------
+hostcmd_ident:
+		MOVLW	'P'
+		CALL	rs232_send
+		MOVLW	'H'
+		CALL	rs232_send
+		MOVLW	'C'
+		CALL	rs232_send
+		MOVLW	'C'
+		CALL	rs232_send
+		MOVLW	'-'
+		CALL	rs232_send
+		MOVLW	MAJOR_VERSION + 0x30
+		CALL	rs232_send
+		MOVLW	'.'
+		CALL	rs232_send
+		MOVLW	MINOR_VERSION + 0x30
+		CALL	rs232_send
+		MOVLW	'.'
+		CALL	rs232_send
+		MOVLW	MICRO_VERSION + 0x30
+		CALL	rs232_send
+		RETURN
+;;--------------------------------
+hostcmd_test:
+		MOVLW	'!'
+		CALL	rs232_send
+		RETURN
+;;--------------------------------
 hostcmd_starttalking:
 		BSF		talk, 0
 		RETURN
-
+;;--------------------------------
 hostcmd_stoptalking:
 		BCF		talk, 0
 		RETURN
-
+;;--------------------------------
 hostcmd_reset:
 		MOVLW	RECVSTATE_RESET1	; go to state RESET1
 		MOVWF	recv_state
 		RETURN
-
+;;--------------------------------
 hostcmd_matrixmap:
-
 		MOVLW	b'10000000'			; keymatrix full map packet
 		RCALL	rs232_send			; send to host
 		MOVLW	128					; number of bytes in keymatrixstate (128x8=1024 keys)
-		MOVWF	counterkmx
+		MOVWF	counterkmx2
 		LFSR	FSR0, keymatrixstate	; load base address of keymatrix[]
 matrixmap_next:
 		MOVF	POSTINC0, W			; load byte in keymatrixstate[]
 		RCALL	rs232_send			; send to host
-		DECFSZ	counterkmx, F		; are we done with all bytes ?
+		DECFSZ	counterkmx2, F		; are we done with all bytes ?
 		BRA		matrixmap_next		; no, send next
 			; send term sequence to host
+
+		;; 				BSF		INTCON, GIE
+
+		
 		MOVLW	b'11111111'			; 'all-bits-one-byte'
 		RCALL	rs232_send			; send to host
 		MOVLW	b'00000000'			; 'all-bits-zero-byte'
 		RCALL	rs232_send			; send to host
 		RETURN
-
+;;--------------------------------
 hostcmd_analogmap:
 		MOVLW	b'10100000'			; analog all axes dump packet
 		RCALL	rs232_send			; send to host
 		MOVLW	NO_ANALOG_CHANNELS	; number of axes
 		MOVWF	counteran
-		LFSR	FSR2, analogin		; load base address of analogin[]
+		LFSR	FSR0, analogin		; load base address of analogin[]
 analogmap_next:
-		MOVF	POSTINC2, W			; get the high byte of 10bit analog value, incrementing FSR0
+		MOVF	POSTINC0, W			; get the high byte of 10bit analog value, incrementing FSR2
 		ANDLW	b'00000011'			; clip out the unwanted part (lower 2bits are used only)
 		RCALL	rs232_send			; send to host  ---> NOT as defined in PHCC2HostProtcol Rev.0
 
-		MOVF	POSTINC2, W			; lower 8 bits of analog value
+		MOVF	POSTINC0, W			; lower 8 bits of analog value
 		RCALL	rs232_send			; send to host
 
 		DECFSZ	counteran, F		; are we done with all bytes ?
@@ -620,290 +1018,271 @@ analogmap_next:
 		MOVLW	b'00000000'			; 'all-bits-zero-byte'
 		RCALL	rs232_send			; send to host
 		RETURN
-
-
+;;--------------------------------
 hostcmd_doasend:
 		MOVLW	RECVSTATE_DOASEND1	; go to state DOASEND1
 		MOVWF	recv_state		
 		RETURN
-
+;;--------------------------------
 hostcmd_dobsend:
 		MOVLW	RECVSTATE_DOBSEND1	; go to state DOBSEND1
 		MOVWF	recv_state		
 		RETURN
-
-hostcmd_outofrange:
-		MOVLW	0x00				; just to be sure set
-		MOVWF	recv_byte			; receive byte to zero
-		RETURN	
+;;;//////////////////////////////////////////////////////
+;;;// END of Host->PHCC Receive State Machine, Inner Part
+;;;//////////////////////////////////////////////////////
 
 
-;;;;;;;;;;;;;; states futher handling
-state_reset1:
-		MOVF	recv_byte, W		; load copy of received byte
-		XORLW	HOSTCMD_RESET		; did we receive another reset (#2)
-		BZ		reset2				; zero flag set if command was reset
-		MOVLW	RECVSTATE_IDLE		; else (no reset): go back to idle
-		MOVWF	recv_state
-		RETURN
-reset2:
-		MOVLW	RECVSTATE_RESET2
-		MOVWF	recv_state
-		RETURN
-
-state_reset2:
-		MOVLW	RECVSTATE_IDLE		; next state will be idle, independent of received byte
-		MOVWF	recv_state
-		MOVF	recv_byte, W		; load copy of received byte
-		XORLW	HOSTCMD_RESET		; did we receive another reset (#3)
-		BTFSC	STATUS, Z			; zero flag set if command was reset
-		RESET						; then reset the PIC, which should invoke the bootloader
-		RETURN						; else return
 
 
-state_doasend1:
-		MOVLW	RECVSTATE_DOASEND2	; transition to next state
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	doa_devaddr			; put byte into appropriate place
-		RETURN						; done
 
-state_doasend2:
-		MOVLW	RECVSTATE_DOASEND3	; transition to next state
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	doa_subaddr			; put byte into appropriate place
-		RETURN						; done
 
-state_doasend3:
-		MOVLW	RECVSTATE_IDLE		; transition to idle
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	doa_data			; put byte into appropriate place
-		CALL	send_DO_A			; data complete, call handler
-		RETURN						; done
 
-state_dobsend1:
-		MOVLW	RECVSTATE_DOBSEND2	; transition to next state
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	dob_addr			; put byte into appropriate place
-		RETURN						; done
-
-state_dobsend2:
-		MOVLW	RECVSTATE_IDLE		; transition to idle
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	dob_data			; put byte into appropriate place
-		CALL	send_DO_B			; data complete, call handler
-		RETURN						; done
-
-state_i2csend1:
-		MOVLW	RECVSTATE_I2CSEND2	; transition to next state
-		MOVWF	recv_state			; save to state variable
-		RETURN						; done
-
-state_i2csend2:
-		MOVLW	RECVSTATE_I2CSEND3	; transition to next state
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	i2cout_addr			; put byte into appropriate place
-		RETURN						; done
-
-state_i2csend3:
-		MOVLW	RECVSTATE_I2CSEND4	; transition to next state
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	i2cout_subaddr		; put byte into appropriate place
-		RETURN						; done
-
-state_i2csend4:
-		MOVLW	RECVSTATE_IDLE		; transition to idle
-		MOVWF	recv_state			; save to state variable
-		MOVF	recv_byte, W		; get received byte
-		MOVWF	i2cout_data			; put byte into appropriate place
-;;;		CALL	send_i2c			; data complete, call handler
-		RETURN						; done
-
-;;-------------------------------
-;; Digital Out Type A
-;;-------------------------------
-;; simple serial sync protocol
-;; receiving end PIC should clock-in data on positive going transition (PGT) of the clk line
-;; addressing by device address (8bit, each receiving PIC has a unique devaddr)
-;;         then by subaddr (tells receiving PIC what to do with it, eg. which port. implementation dependent)
-;; protocol timing: 
-;;   
-;;-------------------------------
-send_DO_A:
-send_DO_A_start:
-		BCF		DO_A_DATA			; start condition indicated by data & clk lines low for 3 cycles
-		BCF		DO_A_CLK			; 
-		CALL	delayDOA			; wait 3*  specified time
-		CALL	delayDOA			; 
-		CALL	delayDOA			; 
-		CALL	delayDOA			; 
-		CALL	delayDOA			; 
-send_DO_A_devaddr:
-		MOVLW	0x08				; dev addr is 8 bits wide
-		MOVWF	counter				; setup bit counter
-		MOVF	doa_devaddr, W		; load devaddr
-		MOVWF	tmp					; load copy into tmp for shifting ops
-next_devaddr:
-		RRCF	tmp, F				; shift right, LSB into Carry
-		RCALL	send_DO_A_out		; send out bit in carry (RCALL does not affect carry)
-		DECFSZ	counter, F			; decrement bit counter
-		BRA		next_devaddr		; loop for all 8 bits
 		
-send_DO_A_subaddr:
-		MOVLW	0x06				; subaddr is 6 bits wide
-		MOVWF	counter				; setup bit counter
-		MOVF	doa_subaddr, W		; load subaddr
-		MOVWF	tmp					; load copy into tmp for shifting ops
-next_subaddr:
-		RRCF	tmp, F				; shift right, LSB into Carry
-		RCALL	send_DO_A_out		; send out bit in carry (RCALL does not affect carry)
-		DECFSZ	counter, F			; decrement bit counter
-		BRA		next_subaddr		; loop for all bits
+	
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** DOA routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+setup_DOA:
+		BCF		DOA_DATA			; set data and 
+		BCF		DOA_CLK				; clock lines low for idle
+		BCF		DOA_CLK_TRIS		; clk is output
+		BCF		DOA_DATA_TRIS		; data is output
+		CLRF	DOAlast				; reset some variables
+		CLRF	DOAfirst
+		CLRF	DOArdy
+		CLRF	packetbitcntr
 
-send_DO_A_data:
-		MOVLW	0x08				; data is 8 bits wide
-		MOVWF	counter				; setup bit counter
-		MOVF	doa_data, W			; load data
-		MOVWF	tmp					; load copy into tmp for shifting ops
-next_databit:
-		RRCF	tmp, F				; shift right, LSB into Carry
-		RCALL	send_DO_A_out		; send out bit in carry (RCALL does not affect carry)
-		DECFSZ	counter, F			; decrement bit counter
-		BRA		next_databit		; loop for all 8 bits
+		;; setup timer for DOAnextbitout, called every 100us (equals 1000 cycles)
+		;; using timer3
 
+		;; setup for timer3
+		CLRF	T3CON				; first reset timer3 control register
+		BSF		T3CON, RD16			; select 16 bit access mode (write to TMR3H before TMR3L!)
+		;;		T3CCP2:T3CCP1   stays 00 since we don't care about the CCP module
+		;; 		T3CKPS1:T3CKPS0 stays 00 for 1:1 prescaler
+		;; 		T3CON, T3SYNC   stays 0  since its ignored in TMR3CS=0 mode anyways
+		BCF		T3CON, TMR3CS		; TMR3CS=0 to use internal clock (fosc/4) to run timer3
+		;; TMR3ON is set further down to start timer3
 
-		BCF		DO_A_DATA			; set data and 
-		BCF		DO_A_CLK			; clock lines low after done sending
+		;; 0xFFFF minus 1000(dec) cycles = 0xFC17
+		;; => round down to 0xFC00
+		MOVLW	0xFC				; see above
+		MOVWF	timer3H				; load value for TMR3H
+		MOVWF	TMR3H				; load high byte of timer3 counter, has to be before TMR3L
+		MOVLW	0x00				; see above
+		MOVWF	timer3L				; load value for TMR3L
+		MOVWF	TMR3L				; load low byte of timer3 counter
+
+		BCF		PIR2, TMR3IF		; clear timer3 interrupt flag
+		BSF		PIE2, TMR3IE		; enable timer3 interrupt
+		BSF		T3CON, TMR3ON		; start timer3
+		RETURN
+;;--------------------------------
+
+;;--------------------------------
+;; DOAbuff_in
+;;--------------------------------
+;; when DOA requests are received from 
+;; the host they are queued here first
+;; 'DOAbuff' is a circular queue buffer
+;;--------------------------------
+DOAbuff_in:	
+		LFSR	FSR0, DOAbuff		; pointer to buffer
+		MOVF	DOAlast, W			; last position
+		ADDWF	FSR0L, F			; is new position in buffer for received byte
+
+		MOVFF	doa_devaddrIN, POSTINC0 ; store all three bytes of a doa packet at once
+		MOVFF	doa_subaddrIN, POSTINC0 ; and postincrement pointer to buffer
+		MOVFF	doa_dataIN, POSTINC0	; 
+
+		MOVLW	0x03				; since we put three new bytes into the buffer...
+		ADDWF	DOAlast, F			; move pointer three forward. Buffer MUST always be a MULTPILE of THREE (3)
+									; such that it points to the next free position in the buffer
+		; check for wrap-around
+		MOVLW	DOAbuffsize			; buffersize -> for comparison
+		CPFSEQ	DOAlast				; compare F with W, skip if eqal
+		BRA		nowrap_DOAbufflast	; not equal, then move on
+		CLRF	DOAlast				; otherwise we need to adjust inFIFO232last
+nowrap_DOAbufflast:
+		BSF		DOArdy, 0			; set first bit in DOAdy => data avail for processing
+		RETURN
+;;--------------------------------
+
+;;--------------------------------
+;; DOAbuff_process
+;;--------------------------------
+;;   processes data in DOAbuff queue
+;;
+;; gets BRA'ed to from DOAnextbitout
+;; -> and ONLY from THERE
+;; BRA's back to the middle of DOAnextbitout
+;; when done
+;;
+;; 'DOAbuff' is a circular queue buffer
+;;--------------------------------
+DOAbuff_process:
+		; check if data is available
+		MOVF	DOAfirst, W
+		CPFSEQ	DOAlast				; if( DOAfirst == DOAlast )
+		BRA		DOAproc_do			; not equal, then data is available for processing
+		RETURN						; otherwise the FIFO is empty, stop processing and RETURN in place of DOAnextbitout
+DOAproc_do:
+		; else process the byte
+		LFSR	FSR0, DOAbuff
+		ADDWF	FSR0L, F			; DOAfirst + base address of DOAbuff
+		MOVFF	POSTINC0, doa_devaddr	; move bytes from buffer 
+		MOVFF	POSTINC0, doa_subaddr	; to variables for 
+		MOVFF	POSTINC0, doa_data		; DOAnextbitout state machine
+
+		MOVLW	0x03				; since we took three bytes out of the buffer...
+		ADDWF	DOAfirst, F			; move pointer three forward. Buffer MUST always be a MULTPILE of THREE (3)
+		; check for wrap-around
+		MOVLW	DOAbuffsize			; buffersize -> for comparison   (Buffer MUST always be a MULTPILE of THREE [3] )
+		CPFSEQ	DOAfirst			; compare F with W, skip if eqal
+		BRA		DOAproc_done		; not equal, then move on
+		CLRF	DOAfirst			; otherwise we need to adjust start-of-buffer pointer
+DOAproc_done:
+		BRA		DOAbuff_process_return_here	; jump to expected return entry (since are we sort-of 'inlined' to DOAnextbitout in the C sense)
+		;; NO RETURN
+;;--------------------------------
+
+;;--------------------------------
+;; Routine:	DOA Send Next Bit Statemachine
+;;--------------------------------
+DOAnextbitout:
+		MOVF	packetbitcntr, W
+		XORLW	0
+		BZ		DOAstate0
+		MOVF	packetbitcntr, W
+		ANDLW	0x01
+		XORLW	1
+		BZ		DOAstate_odd
+		MOVLW	44
+		CPFSLT	packetbitcntr
+		BRA		DOAstate44
+		MOVF	packetbitcntr, W
+		XORLW	16
+		BZ		DOAstate16
+		MOVF	packetbitcntr, W
+		XORLW	28
+		BZ		DOAstate28
+DOAstate_else:
+		INCF	packetbitcntr, F
+		RRCF	DOAshiftout, F
+		BRA		DOA_bit_out
+DOAstate0:
+		; dequeue from DOAbuf
+		BRA		DOAbuff_process	; DOAbuff_process will BRA back here, see label DOAbuff_process_return_here
+								; unless there are no bytes available in the buffer, in which case
+								; DOAbuff_process executes a RETURN for us
+;;- - - - - - - - - - - - - - - - 
+DOAbuff_process_return_here:
+		MOVFF	doa_devaddr, DOAshiftout
+		INCF	packetbitcntr, F
+		RRCF	DOAshiftout, F
+		BRA		DOA_bit_out
+DOAstate_odd:
+		INCF	packetbitcntr, F
+		BRA		DOA_clk_down
+DOAstate44:
+		CLRF	packetbitcntr
+		BRA		DOAnextbitout
+DOAstate16:
+		MOVFF	doa_subaddr, DOAshiftout
+		INCF	packetbitcntr, F
+		RRCF	DOAshiftout, F
+		BRA		DOA_bit_out
+DOAstate28:
+		MOVFF	doa_data, DOAshiftout
+		INCF	packetbitcntr, F
+		RRCF	DOAshiftout, F
+		BRA		DOA_bit_out
+;;--------------------------------
+
+;;-------------------------------
+;; Routine:	DOA Bit Out
+;;-------------------------------
+;; responsible for actually wiggling 
+;; the DOA lines
+;;-------------------------------
+DOA_bit_out:
+		BTFSS	STATUS, C			; bit to send is in Carry
+		BRA		doa_set0			; is it 0 or 1 ?
+doa_set1:
+		BTFSS	DOA_DATA			; if its 1, check if pin is already 1
+		BSF		DOA_DATA			; and set if necessaryt
+		BRA		doa_clk				; and go on with clk pin
+doa_set0:
+		BTFSC	DOA_DATA			; if its 0 check if the pin is already 0
+		BCF		DOA_DATA			; and if not, reset pin to zero
+doa_clk:
+		NOP							; let the data out high/low settle for a little while
+		NOP
+		NOP
+		NOP
+		BSF		DOA_CLK			; then set the clock line high, signal receiving PICs to shift in the data bit
 		RETURN
 
-; sends out bit in Carry
-send_DO_A_out:
-		BCF		DO_A_DATA
-		BTFSC	STATUS, C
-		BSF		DO_A_DATA
-		BSF		DO_A_CLK			; clock line high, signal receiving PICs to shift in the data bit
-		CALL	delayDOA			; wait a specified time
-		BCF		DO_A_CLK			; clock line low after done sending, ready for next bit
-		CALL	delayDOA			; wait a specified time
+;;-------------------------------
+;; Routine:	DOA Clock Down
+;;-------------------------------
+;; responsible for taking the clock
+;; line to LOW after every DOA bit sent out
+;;-------------------------------
+DOA_clk_down:
+		BCF		DOA_CLK			; clock line low after done sending, ready for next bit
 		RETURN
-
-;;-------------------------------
-;; Digital Out Type B
-;;-------------------------------
-send_DO_B:
-		;; 74x595 CLK and STORE latch on positive (low-to-high) going transition
-		MOVF	dob_data, W			; get byte to send out via DO_B
-		MOVWF	tmp					; make temp copy of byte to send
-		MOVLW	8
-		MOVWF	counter				; bit counter for 8 bits
-nextbit_DO_B:
-		BSF		DO_B_DATA			; preset condition for data output pin
-		RLCF	tmp, F				; left rotate into carry, MSB gets shifted into 74x595 first
-		BTFSS	STATUS, C			; bit to send now in carry
-		BCF		DO_B_DATA			; if carry not set: then send a 0 bit, else use preset condition
-		CALL	delayDOB			; wait a specified time
-		BSF		DO_B_CLK			; raise clock line to clock bit into 74x595
-		CALL	delayDOB			; wait a specified time
-		BCF		DO_B_CLK			; lower clock line again
-		DECFSZ	counter, F			; decrement bit counter
-		BRA		nextbit_DO_B		; loop for all 8 bits
-
-		; now that all bits are shifted into the 74x595 we can latch them into the parallel output register
-		BSF		DO_B_STO			; raise the store line
-		CALL	delayDOB			; wait a specified time
-		BCF		DO_B_STO			; lower the store line
-
-		RETURN
-
-;;-------------------------------
-;; convert binary nibble to hexadecimal
-;;-------------------------------
-convert2hex:
-		MOVWF	tmp
-		SUBLW	9					; see if less than 10
-		BTFSC	STATUS,C			; carry bit is set if (k-W)>=0
-		BRA		less_than_10		; <10: 
-		BRA		greater_eq_10		; >= 10: hex uses letters a-f for 10-16
-
-less_than_10:
-		MOVF	tmp,W				; get saved nibble
-		ADDLW	'0'					; add ascii value of "0"
-		BRA		convert2hex_end
-greater_eq_10:
-		MOVF	tmp,w				; get saved nibble
-		ADDLW	'a'-10				; add ascii value of "a"
-convert2hex_end:
-		RETURN
+;;;//////////////////////////////////////////////////////
+;;;// END of DOA routines
+;;;//////////////////////////////////////////////////////
 
 
 
-;;==============================================
-;; serial port routines
-;;==============================================
 
-;;-------------------------------
-;; utility routines
-;;-------------------------------
-inc_addr:
-	; possibly disable interrupts (re-entrancy problems might arise if an interrupt handler uses adr4067)
-		INCF	adr4067, F
-		MOVLW	b'00001111'			; AND mask for adr4067 overflow prevention
-		ANDWF	adr4067, F			; and mask out. that way, adr4067 wraps from 00001111 to 00000000
-									; (other parts of code depend on it)
-	; reenable interrupts
-out_4067:
-		BCF		PORTA, 4			; prepare bit 0 of adr4067  ->  RA4
-		BTFSC	adr4067, 0
-		BSF		PORTA, 4			; bit 0 of adr4067  ->  RA4
-		RRNCF	adr4067, W			; put left shifted version of adr4067 into W
-		MOVWF	PORTE				; out on RE<0:2>
-		RETURN
 
-inc_154:
-		INCF	adr154, F			; next
-		MOVLW	b'00001111'			; mask out the unused bits
-		ANDWF	adr154, F			; by ANDing, this bounds the possible values for adr154 to 0000-1111
 
-out_154:
-#ifdef REV3_BOARD
-		; mirror the bits in the lower nibble: bit0->bit3, bit1->bit2, bit2->bit1, bit3->bit0
-		; mirror, since the REV3 boards' outputs to
-		; the 74HCT154 are in opposite order.
-		MOVLW	0x00				; preset W with zero
-		BTFSC	adr154, 0			; xchange bit 0 -> bit 3
-		BSF		WREG, 3
-		BTFSC	adr154, 1			; xchange bit 1 -> bit 2
-		BSF		WREG, 2
-		BTFSC	adr154, 2			; xchange bit 2 -> bit 1
-		BSF		WREG, 1
-		BTFSC	adr154, 3			; xchange bit 3 -> bit 0
-		BSF		WREG, 0
-		MOVWF	tmp					; put in temp. storage
 		
-		MOVF	PORTB, W			; load PortB into W for manipulation
-		ANDLW	b'11110000'			; mask to keep upper 4 bits (that might have a different purpose)
-		IORWF	tmp, W				; OR together with reversed-bit version of adr154
-		MOVWF	PORTB				; and send out on PORTB the combined adr154 for the 4 lower bits 
-									; and the 4 higher bits from prev. PortB
-#else
-		MOVF	PORTB, W			; load PortB into W for manipulation
-		ANDLW	b'11110000'			; mask to keep upper 4 bits (that might have a different purpose)
-		IORWF	adr154, W			; OR together with adr154
-		MOVWF	PORTB				; and send out on PORTB the combined adr154 for the 4 lower bits 
-									; and the 4 higher bits from prev. PortB
-#endif
-		RETURN
 
-;;-------------------------------
-;; input routines
-;;-------------------------------
-keymatrix_in:
+		
+		
+		
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** Keymatrix Routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+setup_keymatrix:
+		MOVLW	b'11111111'
+		MOVWF	KEYMATRIX_IN_DIRREG	; all pins input for keymatrix columns
+			; clear keymatrixstate[]
+
+		; set direction register bits of A0-A3 of 74x154
+		BCF		ADR0_154_TRIS
+		BCF		ADR1_154_TRIS
+		BCF		ADR2_154_TRIS
+		BCF		ADR3_154_TRIS
+
+		MOVLW	128
+		MOVWF	counterkmx
+		LFSR	FSR1, keymatrixstate
+clr_matrix_next:
+		CLRF	POSTINC1			; clear byte in data mem pointed to by FSR1, then increment FSR1
+		DECFSZ	counterkmx, F		; decrement counter, if zero
+		BRA		clr_matrix_next		; no? repeat
+									; yes? go on
+
+		; ** duplicated code from setup_analog ** (in case analog is not used)
+		CALL	setup_4067			; setup pins for 4067 mux
+		; ** end dupl. code **
+
+		MOVLW	0x00
+		MOVWF	adr154				; init 74x154 selector
+		CALL	out_154
+		RETURN
+;;--------------------------------
 	; one row is 8 bits wide, there are 128 rows, 8(8x8=64 inputs) per daughterboard,
 	; with 16 daughterboards possible
 	; 7-bit address to row in matrix is composed like this:
@@ -915,33 +1294,33 @@ keymatrix_in:
 			; bits 3-6 from adr154	
 
 	; reads in 8 rows at a time (ie 1 daughterboard, 8x8=64 inputs)
+keymatrix_in:
 keymatrix_nextrow:
-		LFSR	FSR0, keymatrixstate	; load base address of state variable for keymatrix
+		LFSR	FSR1, keymatrixstate	; load base address of state variable for keymatrix
 
 			; now compute the offset from keymatrixstate[]
 		RCALL	combine_adr4067_adr154
-		ADDWF	FSR0L, F			; add to base address
+		ADDWF	FSR1L, F			; add to base address
 		MOVWF	col_addr			; save copy of 7bit column address in col_addr
 
 		MOVLW	8					; 8 bits in a byte
 		MOVWF	counterkmx			; setup bit counter
 
-		MOVF	INDF0, W			; read old state of current column from memory
+		MOVF	INDF1, W			; read old state of current column from memory
 		MOVWF	keyinput_old		; and save in keyinput_old variable
 
 		COMF	KEYMATRIX_IN_PORT, W	; read in 8 buttons (1 row) from keymatrix, and invert 
-		MOVWF	INDF0				; and store new value in keymatrixstate[offset]
+		MOVWF	INDF1				; and store new value in keymatrixstate[offset]
 		MOVWF	keyinput_new		; make copy into keyinput_new to compute changes (working copy)
 		XORWF	keyinput_old, W		; W = keyinput_old XOR keyinput_new  => shows changed bits
 		MOVWF	keyinput_delta		; save working copy of changed bits/keys mask		
 
 		BTFSS	talk, 0				; is bit 0 of talk set ? (should we notify host of changed key?)
 		RETURN						; we return if talk bit<0> is not set
-
+;;--------------------------------
 keymatrix_checknextchanged:
 		RLCF	keyinput_delta, F	; move MSB of delta information into carry flag
 		BNC		keymatrix_nochange	; a '1' in carry denotes "button changed", otherwise jump over next sect.
-
 keymatrix_ischange:
 		; there was a change, so we tell the host
 		MOVFF	col_addr, keytmp	; need a working copy of the 7bit column address
@@ -972,70 +1351,196 @@ keymatrix_ischange:
 		IORWF	keytmp, W			; and combine with the lower four bits part consisting of A2-A0 and the switch state
 		RCALL	rs232_send			; send new state
 		BRA		keymatrix_checkchanges_end	; jump around nochange code
-
-
 keymatrix_nochange: 				; to keep track of shifts:
 		RLNCF	keyinput_new, F		; shift temp copy of new state to stay in sync with bit being worked on
-		
 keymatrix_checkchanges_end:
 		DECFSZ	counterkmx, F		; dec bitcounter
 		BRA		keymatrix_checknextchanged	; check next bit for change
 									; else we're done for this column
 		RETURN
+;;--------------------------------
+
+;;;//////////////////////////////////////////////////////
+;;;// END of Keymatrix Routines
+;;;//////////////////////////////////////////////////////
+		
+		
 
 
-;;;;;;;;; ANALOG in ;;;;;;;;;;;;;;;;;;;;;
 
+		
+		
+		
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** analog input routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+setup_analog:
+		BSF		TRISA, 0
+		BSF		TRISA, 1
+		BSF		TRISA, 2
+		BSF		TRISA, 3
+		BSF		TRISA, 5			; setup RA<0-3,5> as analog input pins
+		RCALL	setup_4067			; setup pins for 4067 mux
+		MOVLW	b'11000010'			; right justified results, FOSC/16, AN0-4 are analog input
+		MOVWF	ADCON1
+;;;		MOVLW	b'11000001'			; FRC (use AD RC for ADC timing), AN0 selected, ADON=1
+		MOVLW	b'01000001'			; ADCS0/1: 01 (=> FOSC/16 for ADCON1<ADCS2>=1), ADON=1 (=ADC running)
+									;; why Fosc/16 ? see datasheet chapter 17.2
+		MOVWF	ADCON0
+
+		MOVLW	ANALOG_CHANNEL_STORAGE_SIZE
+		MOVWF	counteran
+		LFSR	FSR2, analogin
+clr_analog_next:
+		CLRF	POSTINC2			; clear byte in data mem pointed to by FSR2, then increment FSR2
+		DECFSZ	counteran, F		; decrement counter, if zero
+		BRA		clr_analog_next		; no? repeat
+									; yes? go on
+		RETURN
+;;--------------------------------
+
+;;-------------------------------
+;; next_anp selects the next primary analog channel
+;; in sequence and jumps to the appropriate setup routine
+;;-------------------------------
+next_anp:
+		INCF	anpctr, W				; next pri. analog
+		ANDLW	b'00000011'				; mask with 4
+		MOVWF	anpctr					; save back to mem
+		XORLW	b'00000011'				; check if its exactly 4
+		BTFSC	STATUS, Z				; if it is
+		CLRF	anpctr					; then reset to 0
+										; now use it
+		MOVF	anpctr, W				; get it
+		XORLW	0						; compare with 0
+		BZ		read_analog_pri1		; if( anpctr == 0 ) then run read_analog_pri1
+
+		MOVF	anpctr, W				; get it
+		XORLW	1						; compare with 1
+		BZ		read_analog_pri2		; if( anpctr == 1 ) then run read_analog_pri2
+
+		MOVF	anpctr, W				; get it
+		XORLW	2						; compare with 2
+		BZ		read_analog_pri3		; if( anpctr == 2 ) then run read_analog_pri3
+		RETURN							; fall-thru safeguard
+;;--------------------------------
+
+;;-------------------------------
+;; read_analog_pri1 
+;; setup for analog primary channel 1
+;;-------------------------------
 read_analog_pri1:
 		LFSR	FSR2, analogin+(0*2)
 		MOVLW	b'00100000'			; ANP1 connected to RA5/AN4
-		BRA		read_analog_pri
+		BRA		read_analog			; read_analog is shared among all analog inputs
+;;--------------------------------
+
+;;-------------------------------
+;; read_analog_pri2 
+;; setup for analog primary channel 2
+;;-------------------------------
 read_analog_pri2:
 		LFSR	FSR2, analogin+(1*2)
 		MOVLW	b'00011000'			; ANP2 connected to RA3/AN3
-		BRA		read_analog_pri
+		BRA		read_analog			; read_analog is shared among all analog inputs
+;;--------------------------------
+
+;;-------------------------------
+;; read_analog_pri3
+;; setup for analog primary channel 3
+;;-------------------------------
 read_analog_pri3:
 		LFSR	FSR2, analogin+(2*2)
 		MOVLW	b'00010000'			; ANP3 connected to RA2/AN2
-read_analog_pri
+		BRA		read_analog			; read_analog is shared among all analog inputs
+;;--------------------------------
+
+;;-------------------------------
+;; read_analog_secA
+;; setup for analog secondary channel A (connected to first 4067)
+;;-------------------------------
+read_analog_secA:
+		LFSR	FSR2, analogin+(3*2)
+		; add adr4067 to FSR2
+		RLNCF	adr4067, W			; load the doubled(=shifted) address used for the 4067 into W
+		ADDWF	FSR2L, F			; FSR2L=FSR2L+W
+		CLRF	WREG				; W = 0, does not affect carry
+		ADDWFC	FSR2H, F			; FSR2H=Carry+FSR2H+0
+		
+		MOVLW	b'00000000'			; 4067 #1 connected to RA0/AN0
+		BRA		read_analog			; read_analog is shared among all analog inputs
+;;--------------------------------
+
+;;-------------------------------
+;; read_analog_secB   
+;; setup for analog secondary channel B (connected to second 4067)
+;;-------------------------------
+read_analog_secB:
+		LFSR	FSR2, analogin+(19*2)
+		; add adr4067 to FSR2
+		RLNCF	adr4067, W			; load the doubled(=shifted) address used for the 4067 into W
+		ADDWF	FSR2L, F			; FSR2L=FSR2L+W
+		CLRF	WREG				; W = 0, does not affect carry
+		ADDWFC	FSR2H, F			; FSR2H=Carry+FSR2H+0
+		
+		MOVLW	b'00001000'			; 4067 #2 connected to RA1/AN1
+;;- - - - - - - - - - - - - - - - 
+
+;;-------------------------------
+;; Common part for all read_analog_*
+;; read_analog starts the aquisition process and returns
+;;-------------------------------
+read_analog:
 		MOVWF	antmp				; store for preparation to ADCON0
 		MOVLW	b'11000111'			; mask out ADCON0<CHS0:CHS2>
 		ANDWF	ADCON0, W			; AND it, leave result in W
 		IORWF	antmp, W			; now OR the stored mask with values set for CHS0:CHS2 and leave in W
 		MOVWF	ADCON0				; and store in ADCON0
-		
-		; wait some A/D aquisistion time after changing the channels
-		RCALL 	delay250us			; about 110 microsecs for 100k
 
+		;; now we need to wait until the ADC's holing capacitor charges.
+		;; during this time we might as well be doing other stuff than running in a tight loop,
+		;; so we
+		RETURN
+		;; for at least 13usec. after that, 
+;;--------------------------------
+		;; we continue here:
+analog_GO:		
 		BSF		ADCON0, GO_DONE		; start conversion process by setting bit GO/!DONE
-anp_adc_wait:
+		;; and since the acquisition process takes some time
+		;; (approx. 20usec) we again
+		RETURN						
+		;; to do other useful stuff and let the ADC do its work alone.
+;;--------------------------------
+		;; finally, calling
+analog_DONE:
+		;; will do the last part of the work of reading an analog value, namely
+		;; saving it to memory and running the filter algorithms
+adc_wait:
 		BTFSC	ADCON0, GO_DONE		; conversion is done when bit GO/!DONE is reset to zero by hardware
-		BRA		anp_adc_wait
-
-
-
-an_store:		
+		BRA		adc_wait
+an_retrieve:		
 		MOVFF	FSR2L, an_addr		; save low byte of address for later
 		CLRF	an_changed			; clear analog-value-changed flag
 				;; store AD result, *high byte* ***first***
 		MOVFF	ADRESH, anbufH		; working copies of ADRESH...
 		MOVFF	ADRESL, anbufL		; ... and ADRESL are stored in anbufH/L
 
-		RCALL	an_anti_jitter		; filters value and stores if necessary
+		RCALL	an_anti_jitter		; run anti_jitter filter algorithm and store values if necessary
 		MOVFF	an_addr, FSR2L		; restore address
 
 		; tell host of change immediately
-		BTFSS	talk, 0				; is bit 0 of talk set ? (should we notify host of changed analog value?)
-		RETURN						; we return if talk bit<0> is not set
-
-an_send_host_update:
-		BTFSS	an_changed, 0
-		RETURN
-
-an_was_change:
-		; there was a change, so we tell the host
-		MOVLW	b'01010000'
-		CALL	rs232_send			; and send to host
+		BTFSS	talk, 0				; if the host is not interested in notifications about changed analog values...
+		RETURN						; we might as well just return
+;;- - - - - - - - - - - - - - - - 
+an_send_host_update:				
+		BTFSS	an_changed, 0		; otherwise check if analog value differs from prev. value
+		RETURN						; if no difference, return
+;;- - - - - - - - - - - - - - - - 
+an_was_change:						; ok, there was a change, so we tell the host
+		MOVLW	b'01010000'			; this is a analog update packet
+		CALL	rs232_send			; send it
 		MOVFF	POSTINC2, anbufH	; get analog value high byte
 		MOVFF	INDF2, anbufL		; get analog value low byte
 		MOVLW	b'00000011'			; mask for the D<9:8> in anbufH
@@ -1050,90 +1555,52 @@ an_was_change:
 		RLNCF	WREG, W				
 		ANDLW	b'11111100'			; mask out lower two bits, now we got A5-A0 in WREG<7:2>
 		IORWF	anbufH, W			; combine A5-0 and D9-8 in WREG
-		CALL	rs232_send			; and send to host
+		CALL	rs232_send			; and send it
 		MOVF	PREINC2, W			; retrieve low byte of analog value
-		CALL	rs232_send			; and send to host
-		RETURN
-
-
-;;-------------------------------
-;; read_analog_secA   read analog secondary channel A (connected to first 4067)
-;;-------------------------------
-read_analog_secA:
-		LFSR	FSR2, analogin+(3*2)
-		; add adr4067 to FSR0
-		RLNCF	adr4067, W			; load the doubled(=shifted) address used for the 4067 into W
-		ADDWF	FSR2L, F			; FSR2L=FSR2L+W
-		CLRF	WREG				; W = 0, does not affect carry
-		ADDWFC	FSR2H, F			; FSR2H=Carry+FSR2H+0
-		
-		MOVLW	b'00000000'			; 4067 #1 connected to RA0/AN0
-		BRA		read_analog_sec
+		CALL	rs232_send			; and send it
+		RETURN						; DONE
+;;--------------------------------
 
 ;;-------------------------------
-;; read_analog_secB   read analog secondary channel B (connected to second 4067)
-;;-------------------------------
-read_analog_secB:
-		LFSR	FSR2, analogin+(19*2)
-		; add adr4067 to FSR0
-		RLNCF	adr4067, W			; load the doubled(=shifted) address used for the 4067 into W
-		ADDWF	FSR2L, F			; FSR2L=FSR0L+W
-		CLRF	WREG				; W = 0, does not affect carry
-		ADDWFC	FSR2H, F			; FSR2H=Carry+FSR2H+0
-		
-		MOVLW	b'00001000'			; 4067 #2 connected to RA1/AN1
-
-read_analog_sec:
-		MOVWF	antmp				; store for preparation to ADCON0
-		MOVLW	b'11000111'			; mask out ADCON0<CHS0:CHS2>
-		ANDWF	ADCON0, W			; AND it, leave result in W
-		IORWF	antmp, W			; now OR the stored mask with values set for CHS0:CHS2 and leave in W
-		MOVWF	ADCON0				; and store in ADCON0
-		
-		; wait some A/D aquisistion time after changing the channels
-		RCALL 	delay250us			; about 110 microsecs for 100k
-
-		BSF		ADCON0, GO_DONE		; start conversion process by setting bit GO/!DONE
-ansec_adc_wait:
-		BTFSC	ADCON0, GO_DONE		; conversion is done when bit GO/!DONE is reset to zero by hardware
-		BRA		ansec_adc_wait
-
-		BRA		an_store			; store analog value in memory
-
-;;-------------------------------
-;; an_anti_jitter
+;; an_anti_jitter - A filter algorithm to eliminate jitter
 ;;-------------------------------
 ;; conditions on call:
 ;;   FSR2 points to memory location analogin[] for *high byte* of current channel
 ;;   new analog value is in anbufH/anbufL
 ;;-------------------------------
+#define JITTER_FILTER_COEFF 0x01
 an_anti_jitter:
 		; basically a digital low pass filter
 		; difference of saved and new value
 		MOVF	anbufH, W			; high byte of new value in anbufH
-		XORWF	POSTINC2, W			; gets XORed with old value at analogin[i]
-		MOVWF	antmp				; store result of XOR
+		SUBWF	POSTINC2, W			; get difference of old and new value
+		BTFSC	STATUS, N			; result is negative if 'negative' flag  is set
+		NEGF	WREG				; if result was negative, negate to make positive
+		
+		MOVWF	antmp				; store result of subtraction
 
 		MOVLW	0x0					; high byte changed at all ?
-		CPFSGT	antmp				; compare XOR result with 1
+		CPFSGT	antmp				; compare subtraction result with 1
 		BRA		anH_zero			; not > 0 => its zero
 
 		MOVLW	0x1					; difference in high byte can be at most 1 ('overflow')
-		CPFSGT	antmp				; compare XOR result with 1
+		CPFSGT	antmp				; compare subtraction result with 1
 		BRA		anH_one				; result was > 1  => the change had a magnitude > 9 bits
 
-		; when we get here, high byte XOR result is > 1
+		; when we get here, high byte subtraction result is > 1
 		BRA		bigchange
-
-#define JITTER_FILTER_COEFF 0x01
-
 
 anH_zero:
 		; difference of low byte
 		MOVF	anbufL, W			; low byte of new value in anbufL
-		XORWF	INDF2, W			; gets XORed with old value at analogin[i] (post decrement address 
+;;		XORWF	INDF2, W			; gets XORed with old value at analogin[i] (post decrement address
 									;  so we are back pointing to the high byte)
-		MOVWF	antmp				; store result of XOR
+
+		SUBWF	INDF2, W			; get difference of old and new value
+		BTFSC	STATUS, N			; result is negative if 'negative' flag  is set
+		NEGF	WREG				; if result was negative, negate to make positive
+		
+		MOVWF	antmp				; store result of subtraction
 		MOVLW	JITTER_FILTER_COEFF	; jitter filter coefficient
 		CPFSGT	antmp				; compare result with jitter filter coefficient (currently 1)
 		RETURN						; no change in value after filtering
@@ -1142,9 +1609,13 @@ anH_zero:
 anH_one:
 		; difference of low byte
 		MOVF	anbufL, W			; low byte of new value in anbufL
-		XORWF	INDF2, W			; gets XORed with old value at analogin[i] (post decrement address 
+;;		XORWF	INDF2, W			; gets XORed with old value at analogin[i] (post decrement address
 									;  so we are back pointing to the high byte)
-		MOVWF	antmp				; store result of XOR
+		SUBWF	INDF2, W			; get difference of old and new value
+		BTFSC	STATUS, N			; result is negative if 'negative' flag is set
+		NEGF	WREG				; if result was negative, negate to make positive
+
+		MOVWF	antmp				; store result of subtraction
 		MOVLW	256-JITTER_FILTER_COEFF	; 256 minus jitter filter coefficient 
 		CPFSLT	antmp				; compare result with jitter filter coefficient subtracted from 256
 		RETURN						; no change in value after filtering
@@ -1156,11 +1627,39 @@ bigchange:
 		MOVFF	anbufL, POSTDEC2	; store low byte, then point FSR2 to pos of hight byte
 		MOVFF	anbufH, POSTINC2	; store high byte, set FSR2 the way its expected, ie. pointing to low byte
 		RETURN
+;;--------------------------------
+
+;;--------------------------------
+
+;;;//////////////////////////////////////////////////////
+;;;// END of analog input routines
+;;;//////////////////////////////////////////////////////
 
 
+
+
+
+
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** I/O Adressing Routines for 4067 and 74x154
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+setup_4067:
+		BCF		TRISA, 4			; output RA4 is bit 0 of adr4067
+		BCF		TRISE, 0			; output RE0 is bit 1 of adr4067
+		BCF		TRISE, 1			; output RE1 is bit 2 of adr4067
+		BCF		TRISE, 2			; output RE2 is bit 3 of adr4067
+		MOVLW	0x00
+		MOVWF	adr4067				; set address for 4067 mux to 0
+		RCALL	out_4067		
+		RETURN
+;;--------------------------------
 
 ;;-------------------------------
-;; combine adr4067 and adr154 addresses into on 7 bit address, leave in W
+;; combine adr4067 and adr154 addresses 
+;; into on 7 bit address, leave in W
 ;;-------------------------------
 combine_adr4067_adr154:
 		MOVF	adr154, W			; load adr154 into W
@@ -1175,75 +1674,79 @@ combine_adr4067_adr154:
 		ANDWF	adr4067, W			; those 3 bits come from adr4067
 		IORWF	tmp, W				; combine into a 7 bit row-address
 		RETURN
+;;--------------------------------
 
-
-;;============================================
-;; SETTING UP ALL SUBSYSTEMS
-;;============================================
 ;;-------------------------------
-;; setup routines
+;; increment and output 4067 address
 ;;-------------------------------
-setup_everything:
-		CLRF	talk
-		RCALL	setup_ints
-		RCALL	setup_rs232
-		RCALL	setup_DO_A
-		RCALL	setup_DO_B
-		RCALL	setup_analog
-		RCALL	setup_keymatrix
-		RCALL	setup_t0
-;;;		RCALL	setup_t1    DON'T ENANABLE for now !!!!
-;		RCALL	setup_i2c
-
+inc_addr:
+inc_adr4067:
+	; possibly disable interrupts (re-entrancy problems might arise if an interrupt handler uses adr4067)
+		INCF	adr4067, F
+		MOVLW	b'00001111'			; AND mask for adr4067 overflow prevention
+		ANDWF	adr4067, F			; and mask out. that way, adr4067 wraps from 00001111 to 00000000
+									; (other parts of code depend on it)
+	; reenable interrupts
+out_4067:
+		BCF		PORTA, 4			; prepare bit 0 of adr4067  ->  RA4
+		BTFSC	adr4067, 0
+		BSF		PORTA, 4			; bit 0 of adr4067  ->  RA4
+		RRNCF	adr4067, W			; put left shifted version of adr4067 into W
+		MOVWF	PORTE				; out on RE<0:2>
 		RETURN
+;;--------------------------------
 
-setup_ints
-		CLRF	INTCON				; clear/disable all interrupts
-		BCF		RCON, IPEN			; no interrupt priorities
+;;-------------------------------
+;; increment and output 74x154 address
+;;-------------------------------
+inc_154:
+		INCF	adr154, F			; next
+		MOVLW	b'00001111'			; mask out the unused bits
+		ANDWF	adr154, F			; by ANDing, this bounds the possible values for adr154 to 0000-1111
+out_154:
+#ifdef REV3_BOARD
+		; mirror the bits in the lower nibble: bit0->bit3, bit1->bit2, bit2->bit1, bit3->bit0
+		; mirror, since the REV3 boards' outputs to
+		; the 74HCT154 are in opposite order.
+		MOVLW	0x00				; preset W with zero
+		BTFSC	adr154, 0			; xchange bit 0 -> bit 3
+		BSF		WREG, 3
+		BTFSC	adr154, 1			; xchange bit 1 -> bit 2
+		BSF		WREG, 2
+		BTFSC	adr154, 2			; xchange bit 2 -> bit 1
+		BSF		WREG, 1
+		BTFSC	adr154, 3			; xchange bit 3 -> bit 0
+		BSF		WREG, 0
+		MOVWF	tmp					; put in temp. storage
+		MOVF	PORTB, W			; load PortB into W for manipulation
+		ANDLW	b'11110000'			; mask to keep upper 4 bits (that might have a different purpose)
+		IORWF	tmp, W				; OR together with reversed-bit version of adr154
+		MOVWF	PORTB				; and send out on PORTB the combined adr154 for the 4 lower bits 
+									; and the 4 higher bits from prev. PortB
+#else
+		MOVF	PORTB, W			; load PortB into W for manipulation
+		ANDLW	b'11110000'			; mask to keep upper 4 bits (that might have a different purpose)
+		IORWF	adr154, W			; OR together with adr154
+		MOVWF	PORTB				; and send out on PORTB the combined adr154 for the 4 lower bits 
+									; and the 4 higher bits from prev. PortB
+#endif
 		RETURN
+;;--------------------------------
+
+;;;//////////////////////////////////////////////////////
+;;;// END of I/O Adressing Routines for 4067 and 74x154
+;;;//////////////////////////////////////////////////////
 
 
-setup_t1:
-		MOVLW	b'10110000'
-		MOVWF	T1CON
-		CLRF	TMR1H
-		CLRF	TMR1L
-		BCF		PIR1, TMR1IF		; clear int flag
+		
 
-;;ENABLING t1 can be dangerous since it tends to block the system such that there's no time for normal processing because all time is spent inside the interrupt service routine!!!!!!!!!!!!!!
-;; there must be someting not clearly understood here!
-		BSF		PIE1, TMR1IE			; set interrupt enable
-;;;;;;;;	BCF	PIE1, TMR1IE ;;;;; DISABLED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-		BSF		T1CON, TMR1ON		; start timer
-		RETURN
-
-setup_t0:
-		MOVLW	b'00001000'			; Timer0: 16bit, int. src, edge don't care, no prescaler, don't start yet
-		MOVWF	T0CON				; set timer
-;; scan matrix every 50ms: 128 rows => scan a row every 400us -> every 4000 fosc/4
-		; 2^16-4000 = 61536 => 0xF060 @ prescaler 1:1
-
-		MOVLW	0xF0
-		MOVWF	TMR0H
-		MOVLW	0x60				; 0xF060 equals about 400us sec without prescaler
-		MOVWF	TMR0L				; TMR0L should come after TMR0H (see datasheet)
-
-;;;		MOVLW	b'00000111'			; Timer0 enabled, 16bit, int. source, edge whatever, prescaler on, 1:256
-				;; timer0 at 16bit width, 1:256 prescaler should give a period of 1.6777sec @ 10MIPS
-;;;		MOVWF	T0CON				; X seconds timer should be started now
-;;;		MOVLW	0x01
-;;;		MOVWF	TMR0H
-;;;		MOVLW	0x04				; 0x0104 equals about 1 sec with prescaler 1:256
-;;;		MOVWF	TMR0L				; TMR0L should come after TMR0H (see datasheet)
-		BCF		INTCON, TMR0IF		; clear Timer0 interrupt flag
-	BSF		INTCON, TMR0IE
-;;	BCF	INTCON, TMR0IE  ;;;;; DISABLED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-		BSF		T0CON, TMR0ON		; start timer0
-		RETURN
-
-
+		
+		
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** serial port routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 setup_rs232:
 		CLRF	inFIFO232first		; init variables, pointer to first unprocessed byte received
 		CLRF	inFIFO232last		; last unprocessed byte received
@@ -1251,10 +1754,8 @@ setup_rs232:
 		CLRF	outFIFO232last		; last unprocessed byte to send
 		CLRF	FIFOrdy				; bitmapped register for fifo related stuff
 
-;;;;;;; HIGHLY  EXPERIMENTAL: set serial port speed up to 115.2 kbps
 		MOVLW	21					; BRGH=1, 21 => 115200 bps **** @40MHz ****
 		MOVWF	SPBRG
-;;;;;;;;;;;;;;;;;;;;;;;;;;;
 		BSF		CTSTRIS				; CTS is an input
 		BCF		RTSTRIS				; RTS is an output
 		BSF		RTS 				; not ready to receive yet, this is controlled by rs232_recv
@@ -1264,84 +1765,221 @@ setup_rs232:
 		BCF		PIR1, RCIF			; clear interrupt flag for receive
 		BCF		PIR1, TXIF			; clear interrupt flag for send
 		BSF		PIE1, RCIE			; enable serial port receive interrupt
-;;;;		BSF		PIE1, TXIE			; enable serial port send done interrupt
+		BCF		PIE1, TXIE			; start up with serial port send-done interrupt disabled
 		BCF		RTS					; RTS/CTS hardware handshake: we're ready to receive
 
 		RETURN
+;;--------------------------------
 
-setup_DO_A:
-		BCF		DO_A_DATA			; set data and 
-		BCF		DO_A_CLK			; clock lines low for idle
-		BCF		DO_A_CLK_TRIS		; clk is output
-		BCF		DO_A_DATA_TRIS		; data is output
+;;--------------------------------
+;; rs232recv2fifo
+;;--------------------------------
+;;   gets called by ISR
+;;   puts received byte in buffer
+;;   adjusts buffer pointers
+;; 'inFIFO232' is a circular queue buffer
+;;--------------------------------
+rs232recv2fifo:
+		BSF		RTS					; RTS/CTS hardware handshake: NOT ready to receive while processing
+		BTG		LED					; DEBUG: toggle LED
+		LFSR	FSR0, inFIFO232		; pointer to buffer
+		MOVF	inFIFO232last, W	; last position
+		ADDWF	FSR0L, F			; is new position in buffer for received byte
+		MOVF	RCREG, W			; serially received byte -> W
+		MOVWF	INDF0				; store at last position
+
+		INCF	inFIFO232last, F	; point to new (empty) position
+		; check for wrap-around
+		MOVLW	FIFOsize-1			; buffersize -> for comparison
+		CPFSEQ	inFIFO232last		; compare F with W, skip if eqal
+		BRA		nowrap_inFIFOlast	; not equal, then move on
+		CLRF	inFIFO232last		; otherwise we need to adjust inFIFO232last
+nowrap_inFIFOlast:
+		BSF		FIFOrdy, 0			; set first bit in FIFOrdy => data avail for processing
+		; check for transmission errors
+		BTFSC	RCSTA,OERR			; overrun error ?
+		BRA		receiveoverrun
+		BRA		receive_done		; else done
+receiveoverrun:
+		BCF		RCSTA,CREN			; clear CREN to clear OERR flag
+		BSF		RCSTA,CREN			; set CREN to reenable continuous receive
+		BSF		overrunflag,0
+		MOVF	RCREG,W				; flush receive register
+receive_done:
+		BCF		RTS					; RTS/CTS hardware handshake: we're ready to receive
+		BCF		PIR1, RCIF			; clear int flag
 		RETURN
+;;--------------------------------
 
-setup_DO_B:
-		BCF		DO_B_CLK_TRIS		; clk is output
-		BCF		DO_B_DATA_TRIS		; data is output
-		BCF		DO_B_STO_TRIS		; store is output
-		BCF		DO_B_CLK			; DO_B output pins low initially
-		BCF		DO_B_DATA			; including DATA
-		BCF		DO_B_STO			; and STOre
+;;--------------------------------
+;; rs232inFIFOprocess
+;;--------------------------------
+;;   processes data in inFIFO232
+;; 'inFIFO232' is a circular queue buffer
+;;--------------------------------
+rs232inFIFOprocess:
+		; check if data is available
+		MOVF	inFIFO232first, W
+		CPFSEQ	inFIFO232last		; if( inFIFOfirst == inFIFOlast )
+		BRA		inFIFOproc_do		; not equal, then data is available for processing
+		BRA		inFIFOproc_done		; equal, the FIFO is empty, we can stop processing
+inFIFOproc_do:
+		; else process the byte		
+		LFSR	FSR0, inFIFO232
+		ADDWF	FSR0L, F			; inFIFOfirst + base address of inFIFO
+		MOVF	INDF0, W
+		MOVWF	recv_byte			; save received byte where it is expected by some routines
+		CALL	recvstatemachine	; let the statemachine decide what to do with the byte
+		INCF	inFIFO232first, F	; byte in buffer processed, move pointer to next
+		; check for wrap-around
+		MOVLW	FIFOsize-1			; buffersize -> for comparison
+		CPFSEQ	inFIFO232first		; compare F with W, skip if eqal
+		BRA		inFIFOproc_done		; not equal, then move on
+		CLRF	inFIFO232first		; otherwise we need to adjust inFIFO232first
+inFIFOproc_done:		
 		RETURN
+;;--------------------------------
 
-setup_4067:
-		BCF		TRISA, 4			; output RA4 is bit 0 of adr4067
-		BCF		TRISE, 0			; output RE0 is bit 1 of adr4067
-		BCF		TRISE, 1			; output RE1 is bit 2 of adr4067
-		BCF		TRISE, 2			; output RE2 is bit 3 of adr4067
-		MOVLW	0x00
-		MOVWF	adr4067				; set address for 4067 mux to 0
-		RCALL	out_4067		
+;;--------------------------------
+;; rs232_send
+;;--------------------------------
+;; user callable function to send
+;; a byte to host does NOT actually 
+;; send, just puts byte in buffer
+;; 'outFIFO232' is a circular queue buffer
+;;--------------------------------
+rs232_send:
+		BSF		gie_flag, 0			; save GIE bit
+		BTFSS	INTCON, GIE			; to differentiate if we were called from inside an interrupt handler
+		BCF		gie_flag, 0
+		BCF	INTCON, GIE				; disable interrupts
+
+		MOVFF	FSR0L, fsr0l_232	; need to save fsr0 since caller might be using it
+		MOVFF	FSR0H, fsr0h_232	;  dito
+		MOVWF	tmpFIFO				; need to temporarily store byte
+		LFSR	FSR0, outFIFO232	; load base address for indirect adressing
+		MOVF	outFIFO232last, W	; last position
+		ADDWF	FSR0L, F			; is new position in buffer for received byte
+		MOVF	tmpFIFO, W			; get byte to send
+		MOVWF	INDF0				; put in buffer
+		INCF	outFIFO232last, F	; point to new (empty) position
+
+		; enable usart send interrupt. this will cause rs232fifo2send 
+		; to kick in and send the stuff in the buffer to the host
+		BSF		PIE1, TXIE			; enable serial port send-done interrupt
+
+		MOVFF	fsr0l_232, FSR0L	; restore fsr0 for caller (see above)
+		MOVFF	fsr0h_232, FSR0H	;   dito
+
+		BTFSC	gie_flag, 0			; were we called from outside an interrupt handler ?
+		BSF	INTCON, GIE				; yes, then re-enable interrupts
+
 		RETURN
+;;--------------------------------
 
-setup_analog:
-		BSF		TRISA, 0
-		BSF		TRISA, 1
-		BSF		TRISA, 2
-		BSF		TRISA, 3
-		BSF		TRISA, 5			; setup RA<0-3,5> as analog input pins
-		RCALL	setup_4067			; setup pins for 4067 mux
-		MOVLW	b'10000010'			; right justified results, FOSC/2, AN0-4 are analog input
-		MOVWF	ADCON1
-		MOVLW	b'11000001'			; FRC (use AD RC for ADC timing), AN0 selected, ADON=1
-		MOVWF	ADCON0
+;;--------------------------------
+;; rs232fifo2send
+;;--------------------------------
+;;   gets called by ISR???
+;;   sends out byte via RS-232 (if outFIFO232 not empty)
+;;   adjusts buffer pointers
+;; 'outFIFO232' is a circular queue buffer
+;;--------------------------------
+rs232outFIFOprocess:
+rs232fifo2send:
+		MOVF	outFIFO232first, W	; load pointer to first unsent byte in buffer
+		CPFSEQ	outFIFO232last		; check if( first unsent==last unsent) 
+		BRA		fifo2send_hostrdy	; not equal, that means we do have something to send
+		BRA		fifo2send_empty		; they are equal, fifo empty, nothing to send
 
-		MOVLW	ANALOG_CHANNEL_STORAGE_SIZE
-		MOVWF	counteran
-		LFSR	FSR2, analogin
-clr_analog_next:
-		CLRF	POSTINC2			; clear byte in data mem pointed to by FSR2, then increment FSR2
-		DECFSZ	counteran, F		; decrement counter, if zero
-		BRA		clr_analog_next		; no? repeat
-									; yes? go on
+fifo2send_hostrdy:
+		BTFSS	TXSTA,TRMT			; send shift register empty? (prev. send done?)
+		BRA		fifo2send_no		; no, not yet, maybe next cycle
+		BTFSC	CTS					; RTS/CTS hardware handshake: is the host ready?
+		BRA		fifo2send_no		; no, host not ready, maybe next time
+		; else (host IS ready):
+		LFSR	FSR0, outFIFO232	; load base address for indirect adressing
+		ADDWF	FSR0L, F			; compute position in buffer of byte to send
+		MOVF	INDF0, W			; get byte from buffer
+		MOVWF	TXREG				; and send it out via serial port
+
+		INCF	outFIFO232first, F	; adjust pointer to next byte in buffer
+		; check for overflow
+		MOVLW	0x00				; did the pointer wrap to zero ?
+		CPFSEQ	outFIFO232first		; if( outFIFOfirst == 0 )
+		BRA		fifo2send_done		; not zero, did not wrap around, then we're done
+		MOVLW	LOW(outFIFO232)		; yes, equal, take lower 8 bits and
+		MOVWF	outFIFO232first		; set to start pos of buffer (relative to memory page)
+
+fifo2send_done:
+fifo2send_no:
+		RETURN
+fifo2send_empty:
+		BCF		PIE1,TXIE			; the queue is empty, so disable serial port send-done interrupt
+									; to avoid being called excessively for nothing (otherwise we 
+									; would block everything else from executing
+		RETURN
+;;;//////////////////////////////////////////////////////
+;;;// END of serial port routines
+;;;//////////////////////////////////////////////////////
+
+
+
+
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** DOB routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+setup_DOB:
+		BCF		DOB_CLK_TRIS		; clk is output
+		BCF		DOB_DATA_TRIS		; data is output
+		BCF		DOB_STO_TRIS		; store is output
+		BCF		DOB_CLK				; DOB output pins low initially
+		BCF		DOB_DATA			; including DATA
+		BCF		DOB_STO				; and STOre
+		RETURN
+;;--------------------------------
+
+;;-------------------------------
+;; Digital Out Type B
+;;-------------------------------
+send_DOB:
+		;; 74x595 CLK and STORE latch on positive (low-to-high) going transition
+		MOVF	dob_data, W			; get byte to send out via DOB
+		MOVWF	tmp					; make temp copy of byte to send
+		MOVLW	8
+		MOVWF	DOBcounter			; bit counter for 8 bits
+nextbit_DOB:
+		BSF		DOB_DATA			; preset condition for data output pin
+		RLCF	tmp, F				; left rotate into carry, MSB gets shifted into 74x595 first
+		BTFSS	STATUS, C			; bit to send now in carry
+		BCF		DOB_DATA			; if carry not set: then send a 0 bit, else use preset condition
+		CALL	delayDOB			; wait a specified time
+		BSF		DOB_CLK				; raise clock line to clock bit into 74x595
+		CALL	delayDOB			; wait a specified time
+		BCF		DOB_CLK				; lower clock line again
+		DECFSZ	DOBcounter, F		; decrement bit counter
+		BRA		nextbit_DOB			; loop for all 8 bits
+
+		; now that all bits are shifted into the 74x595 we can latch them into the parallel output register
+		BSF		DOB_STO				; raise the store line
+		CALL	delayDOB			; wait a specified time
+		BCF		DOB_STO				; lower the store line
 
 		RETURN
+;;;//////////////////////////////////////////////////////
+;;;// END of DOB routines
+;;;//////////////////////////////////////////////////////
 
 
-setup_keymatrix:
-		MOVLW	b'11111111'
-		MOVWF	KEYMATRIX_IN_DIRREG	; all pins input for keymatrix columns
-			; clear keymatrixstate[]
-		MOVLW	128
-		MOVWF	counterkmx
-		LFSR	FSR0, keymatrixstate
-clr_matrix_next:
-		CLRF	POSTINC0			; clear byte in data mem pointed to by FSR0, then increment FSR0
-		DECFSZ	counterkmx, F		; decrement counter, if zero
-		BRA		clr_matrix_next		; no? repeat
-									; yes? go on
+		
 
-		; ** duplicated code from setup_analog ** (in case analog is not used)
-		RCALL	setup_4067			; setup pins for 4067 mux
-		; ** end dupl. code **
-
-		MOVLW	0x00
-		MOVWF	adr154				; init 74x154 selector
-		RCALL	out_154
-		RETURN
-
-
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** I2C routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 setup_i2c:
 		BSF		TRISC, 3			; SCL, input for I2C
 		BSF		TRISC, 4			; SDA, input for I2C
@@ -1349,23 +1987,22 @@ setup_i2c:
 		MOVWF	SSPCON1
 ;		MOVLW	b'0' ???					; 
 		MOVWF	SSPCON2				
-
+		;; NOT FINISHED YET !!!
 		RETURN
+;;--------------------------------
+
+;;;//////////////////////////////////////////////////////
+;;;// END of I2C routines
+;;;//////////////////////////////////////////////////////
 
 
 
-send_crlf:
-		MOVLW	'\r'				; send a CR
-		RCALL	rs232_send	
-		MOVLW	'\n'				; send a LF
-		RCALL	rs232_send	
-		RETURN
 
-
-
-;;-------------------------------
-;; delay routines
-;;-------------------------------
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;;;******************************************************
+;;;** delay routines
+;;;******************************************************
+;;;@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 delay1ms:
 		MOVLW	FREQTIMESFOUR
 		MOVWF	delaycounter_freq
@@ -1424,7 +2061,7 @@ delay_inner:						; inner loop takes 5usec @4MHz
 		DECFSZ	delaycounter_freq,F
 		BRA		delay_freq
 		RETURN
-
+;;-------------------------------
 delayDOB:
 		NOP
 		NOP
@@ -1432,12 +2069,7 @@ delayDOB:
 		NOP
 		NOP
 		RETURN
-
-delayDOA:
-		BRA		delay100us   ; testtestestestestestest
-		;; .....
-		RETURN
-
+;;-------------------------------
 delay100us:  ;;@40MHZ => 10MIPS     1000 instructions in 100us
 		MOVLW	200						; 200*5 = 1000 instructions
 		MOVWF	delaycounter_inner
@@ -1447,7 +2079,7 @@ delay_us_100_inner:						; inner loop takes 5 cycles
 		DECFSZ	delaycounter_inner,F 	; 1 cycle while looping 
 		BRA		delay_us_100_inner		; 2 cycles 
 		RETURN
-
+;;-------------------------------
 delay50us:  ;;@40MHZ => 10MIPS     500 instructions in 50us
 		MOVLW	100						; 100*5 = 500 instructions
 		MOVWF	delaycounter_inner
@@ -1457,8 +2089,7 @@ delay_us_50_inner:						; inner loop takes 5 cycles
 		DECFSZ	delaycounter_inner,F 	; 1 cycle while looping 
 		BRA		delay_us_100_inner		; 2 cycles 
 		RETURN
-
-
+;;-------------------------------
 delay250us:
 		MOVLW	FREQTIMESFOUR
 		MOVWF	delaycounter_freq
@@ -1478,13 +2109,18 @@ delay_us_250_inner:					; inner loop takes 5usec @4MHz
 		DECFSZ	delaycounter_freq,F
 		BRA		delay_us_250_freq
 		RETURN
-
+;;-------------------------------
 delay1sec:
 		RCALL	delay250ms
 		RCALL	delay250ms
 		RCALL	delay250ms
 		RCALL	delay250ms
 		RETURN
+
+;;;//////////////////////////////////////////////////////
+;;;// END of delay routines
+;;;//////////////////////////////////////////////////////
+
 ;;=================================================
 ;; End of program
 ;;=================================================
