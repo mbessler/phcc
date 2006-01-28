@@ -11,7 +11,12 @@ USE_DEBUG=0
 CXX=g++
 CC=gcc
 
-CFLAGS=-I. -g -pedantic -Wall
+SUBDIRS=../lib
+VPATH+=$(SUBDIRS)
+
+INCLUDES=$(SUBDIRS:%=-I%)
+
+CFLAGS=-I. -g -pedantic -Wall $(INCLUDES)
 LDFLAGS=
 EXEC_EXT=
 LIB_EXT=.o
@@ -44,16 +49,21 @@ ifdef COMPILERPREFIX
   CC:=$(COMPILERPREFIX)$(CC)
 endif
 
-PROGS=testPHCC_Serial testMB_Opt
+CXX_PROGS=testPHCC_Serial testMB_Opt
+C_PROGS=
+PROGS=$(C_PROGS) $(CXX_PROGS)
+
+HEADERS=PHCC_Serial.h MB_Opt.h
+
 
 testPHCC_Serial_OBJS=testPHCC_Serial PHCC_Serial
 testPHCC_Serial_LIBS=
+testPHCC_Serial_CFLAGS=
 
 testMB_Opt_OBJS=testMB_Opt MB_Opt
 testMB_Opt_LIBS=
+testMB_Opt_CFLAGS=
 
-
-HEADERS=PHCC_Serial.h MB_Opt.h
 
 ifeq ($(WIN32),1)
   $(CPPOBJS:%=%$(LIB_EXT))
@@ -62,24 +72,23 @@ endif
 ##########################################################################
 all build: $(PROGS)
 
-define PROGRAM_template
+define CXX_PROGRAM_template
 $(1): $$($(1)_OBJ) $$($(1)_OBJS:%=%$$(LIB_EXT))
 	$$(CXX) $$(LDFLAGS) -o $$@$$(EXEC_EXT) $$^
 ALL_OBJS += $$($(1)_OBJS:%=%$$(LIB_EXT))
 endef
 
+define C_PROGRAM_template
+$(1): $$($(1)_OBJ) $$($(1)_OBJS:%=%$$(LIB_EXT))
+	$$(CC) $$(LDFLAGS) -o $$@$$(EXEC_EXT) $$^
+ALL_OBJS += $$($(1)_OBJS:%=%$$(LIB_EXT))
+endef
 
-$(foreach prog,$(PROGS),$(eval $(call PROGRAM_template,$(prog))))
-#$(eval $(call PROGRAM_template,testPHCC_Serial))
-#$(eval $(call PROGRAM_template,testMB_Opt))
+$(foreach prog,$(CXX_PROGS),$(eval $(call CXX_PROGRAM_template,$(prog))))
+$(foreach prog,$(C_PROGS),$(eval $(call C_PROGRAM_template,$(prog))))
 
 
-
-#testPHCC_Serial: $(testPHCC_Serial_OBJS:%=%$(LIB_EXT))
-#	$(CXX) $(LDFLAGS) -o $@$(EXEC_EXT) $^
-
-#testMB_Opt: $(testMB_Opt_OBJS:%=%$(LIB_EXT))
-#	$(CXX) $(LDFLAGS) -o $@$(EXEC_EXT) $^
+.SUFFIXES:
 
 %.lib : %.cpp $(HEADERS)
 	$(CXX) $(CFLAGS) -c -o $@ $<
@@ -94,7 +103,7 @@ $(foreach prog,$(PROGS),$(eval $(call PROGRAM_template,$(prog))))
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 %.h:
-	echo "header file dependency: $<"
+	@#echo "header file dependency: $<"
 
 clean:
 	rm -f core* $(PROGS) $(PROGS:%=%.exe) *.o *.lib $(ALL_OBJS)
