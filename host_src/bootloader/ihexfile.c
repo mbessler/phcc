@@ -34,11 +34,16 @@
 
 int line=0;
 
+/* -------------------------------------------------------------------------
+   Read a line from hexfile of either INHX16 or INHX8M format type, detecting
+   the format automagicly by the bytecount and length of the line
+   ------------------------------------------------------------------------ */
 int readihexline(FILE *fp, unsigned int *mem, int * startaddress, int * words)
 {
 	char  buf[81];
 	char  *bptr;
-	int   count, addr, cksum, type, x, data;
+	int   cksum, x;
+	unsigned int count, addr, type, data;
 
 	if( fgets( buf, 81, fp ) == NULL )
 		return ENDOFFILE;
@@ -67,7 +72,7 @@ int readihexline(FILE *fp, unsigned int *mem, int * startaddress, int * words)
 
 	/* End of file field, exit now */      
 	if( type == 0x01 )
-	  return ENDOFFILE; // no more content available
+	  return ENDOFFILE; /* no more content available */
 
 	/* Start calculating the checksum */
 	cksum = (count & 0xFF);
@@ -89,15 +94,17 @@ int readihexline(FILE *fp, unsigned int *mem, int * startaddress, int * words)
 		{
 			if( !sscanf( bptr, "%02X", &data ) )
 				return JUNK;
+			*startaddress = addr/2;
 	    		mem[x] = data;
 	    		cksum += (data & 0xFF);
 	    		bptr += 2;
 	    		if( !sscanf( bptr, "%02X", &data ) )
 				return JUNK;
-			mem[x] += (data << 8);
+			mem[x] |= (data << 8);
 			cksum += (data & 0xFF);
 			bptr += 2;
 	  	}
+		*words = count/2;
 	}
 	else if( (strlen(buf) - 11) == (count * 4) ) 
 	{
@@ -111,6 +118,7 @@ int readihexline(FILE *fp, unsigned int *mem, int * startaddress, int * words)
 			cksum += (data & 0xFF);
 			bptr += 4;
 		}
+		*words = count;
 	}
 	else
 		return JUNK;
@@ -124,129 +132,7 @@ int readihexline(FILE *fp, unsigned int *mem, int * startaddress, int * words)
 		printf("Checksum mismatch on line %d (%02X != %02X\n", line, data & 0xFF, cksum & 0xFF );
 		return CHECKSUMERROR;
 	}
-	*words = count;
 	return OK;
-}
-
-/* -------------------------------------------------------------------------
-   Read a Intel HEX file of either INHX16 or INHX8M format type, detecting
-   the format automagicly by the bytecount and length of the line
-   ------------------------------------------------------------------------ */
-int readihex( FILE *fp, unsigned int *mem, int *min, int *max )
-{
-  char	buf[81];
-  char	*bptr;
-  int	count, addr, cksum, type, x, data, line;
-  
-  
-  *min = MAXPICSIZE;
-  *max = 0;
-  line = 0;  
-  
-  /* Read each line of the file */
-  while( fgets( buf, 81, fp ) != NULL )
-  {
-    line++;
-    
-    bptr = buf;
-    /* If it isn't a valid intel hex line, then move to the next line */
-    if( *bptr != ':' )
-      continue;
-
-    /* Strip off any trailing CR/LF if present, check twice. */
-    if( ( buf[strlen(buf)-1] == 0x0D ) || ( buf[strlen(buf)-1] == 0x0A) )
-      buf[strlen(buf)-1] = 0x00;
-    if( ( buf[strlen(buf)-1] == 0x0D ) || ( buf[strlen(buf)-1] == 0x0A) )
-      buf[strlen(buf)-1] = 0x00;
-      
-    /* Get the byte count for this line */
-    bptr++;
-    if( !sscanf( bptr, "%02X", &count ) )
-      continue;
-      
-    /* Get the address */
-    bptr += 2;
-    if( !sscanf( bptr, "%04X", &addr ) )
-      continue;
-      
-    if( addr > *max )
-      *max = addr;
-      
-    if( addr < *min )
-      *min = addr;
-      
-    /* Get the type of field */
-    bptr += 4;
-    if( !sscanf( bptr, "%02X", &type ) )
-      continue;
-
-    /* End of file field, exit now */      
-    if( type == 0x01 )
-      return TRUE;
-
-    /* Start calculating the checksum */
-    cksum = (count & 0xFF);
-    cksum += ((addr >> 8) & 0xFF);
-    cksum += (addr & 0xFF);
-    cksum += (type & 0xFF);
-
-    /* Point to the first data byte */
-    bptr += 2; 
-      
-    /* Figure out if its INHX16 or INHX8M
-       If the length of the string - 11 == count then its INHX8M
-       If it == count*2 then its INHX16
-     */
-    if( (strlen(buf) - 11) == (count * 2) )
-    {
-      /* Processing a INHX8 line */
-      for( x = 0; x < (count/2); x++ )
-      {
-        /* Will this exit the for/next or do I need a break? */
-        if( !sscanf( bptr, "%02X", &data ) )
-          continue;
-          
-        mem[(addr/2)+x] = data;
-        
-        cksum += (data & 0xFF);
-        
-        bptr += 2;
-        /* Will this exit the for/next or do I need a break? */
-        if( !sscanf( bptr, "%02X", &data ) )
-          continue;
-          
-        mem[(addr/2)+x] += (data << 8);
-        
-        cksum += (data & 0xFF);
-        
-        bptr += 2;
-      }
-    } else if( (strlen(buf) - 11) == (count * 4) ) {
-      /* Processing a INHX16 line */
-      for( x = 0; x < count; x++ )
-      {
-        if( !sscanf( bptr, "%04X", &data ) )
-          continue;
-          
-        mem[addr+x] = data;
-        cksum += ((data >> 8) & 0xFF);
-        cksum += (data & 0xFF);
-        
-        bptr += 4;
-      }
-    } else {
-      continue;
-    }
-
-    /* Process the checksum */
-    if( !sscanf( bptr, "%02X", &data ) )
-      continue;
-        
-    if( ((-cksum) & 0xFF) != (data & 0xFF) )
-      printf("Checksum mismatch on line %d (%02X != %02X\n", line, data & 0xFF, cksum & 0xFF );
-  }
-
-  return TRUE;
 }
 
 

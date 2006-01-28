@@ -49,45 +49,25 @@ ifdef COMPILERPREFIX
   CC:=$(COMPILERPREFIX)$(CC)
 endif
 
-CXX_PROGS=phcc_reset phcc_doa_raw phcc_getkeymap phcc_getanalogmap phcc_watch_talking phcc_lcd_demo parport_doa_raw phcc_watch_talking_raw
-C_PROGS=
+CXX_PROGS=an851host_newserial
+C_PROGS=an851host
 PROGS=$(C_PROGS) $(CXX_PROGS)
 
-HEADERS=PHCC_Serial.h MB_Opt.h
+HEADERS=PHCC_Serial.h MB_Opt.h ihexfile.h
 
 
-phcc_reset_OBJS=phcc_reset PHCC_Serial MB_Opt
-phcc_reset_LIBS=
-phcc_reset_CFLAGS=
+an851host_OBJS=an851host ihexfile
+an851host_LIBS=
+an851host_CFLAGS=
 
-phcc_doa_raw_OBJS=phcc_doa_raw PHCC_Serial MB_Opt
-phcc_doa_raw_LIBS=
-phcc_doa_raw_CFLAGS=
+an851host_newserial_OBJS=an851host_newserial ihexfile ../lib/PHCC_Serial ../lib/MB_Opt
+an851host_newserial_LIBS=
+an851host_newserial_CFLAGS=
 
-phcc_getkeymap_OBJS=phcc_getkeymap PHCC_Serial MB_Opt
-phcc_getkeymap_LIBS=
-phcc_getkeymap_CFLAGS=
 
-phcc_getanalogmap_OBJS=phcc_getanalogmap PHCC_Serial MB_Opt
-phcc_getanalogap_LIBS=
-phcc_getanalogap_CFLAGS=
 
-phcc_watch_talking_OBJS=phcc_watch_talking PHCC_Serial MB_Opt
-phcc_watch_talking_LIBS=
-phcc_watch_talking_CFLAGS=
-
-phcc_watch_talking_raw_OBJS=phcc_watch_talking_raw PHCC_Serial MB_Opt
-phcc_watch_talking_raw_LIBS=
-phcc_watch_talking_raw_CFLAGS=
-
-phcc_lcd_demo_OBJS=phcc_lcd_demo PHCC_Serial MB_Opt
-phcc_lcd_demo_LIBS=
-phcc_lcd_demo_CFLAGS=
-
-ifneq ($(WIN32),1)
-parport_doa_raw_OBJS=parport_doa_raw MB_Opt
-parport_doa_raw_LIBS=
-parport_doa_raw_CFLAGS=
+ifeq ($(WIN32),1)
+  $(CPPOBJS:%=%$(LIB_EXT))
 endif
 
 ##########################################################################

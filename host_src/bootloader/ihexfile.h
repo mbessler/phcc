@@ -2,6 +2,7 @@
 #define _IHEXFILE_H
 
 #include <stdio.h>
+#include <string.h>
 
 #define OK 0
 #define ENDOFFILE 1

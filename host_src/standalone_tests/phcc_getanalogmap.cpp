@@ -53,11 +53,10 @@ int main(int argc, char * argv[])
 	   exit(-1);
 	}
 
-//
 	printf("requesting analog map from PHCC\n");
-	unsigned char b = 0x05;   // PHCC analogmap get
+	unsigned char b = 0x05;   // PHCC keymatrix get
 	port->serialWriteBlocking(b);
-	for(i=0; i<1+35*2+2; i++)
+	for(int i=0; i<1+35*2+2; i++)
 	{
 		unsigned char bret;
 		port->serialReadBlocking(&bret);

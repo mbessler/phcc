@@ -91,7 +91,7 @@ int MB_Opt::getOptAsInt(const std::string & _optname)
 
 const char * MB_Opt::getNonOptParm(unsigned int num)
 {
-   int counter = 0;
+   unsigned int counter = 0;
    nonParamOptsIter = nonParamOpts.begin();
    while( nonParamOptsIter != nonParamOpts.end() )
    {
