@@ -218,7 +218,8 @@ void PHCC_Serial::setline(int speed, bool useRTSCTS)
 	t.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  /* raw input (not line oriented) */
 
 
-	t.c_iflag |= (IGNPAR | IGNBRK | IGNCR );  /* ignore parity errors, ignore Break */
+	t.c_iflag |= (IGNPAR | IGNBRK /*| IGNCR*/ );  /* ignore parity errors, ignore Break */
+	t.c_iflag &= ~(IGNCR | INLCR | ICRNL);
 	t.c_iflag &= ~(IXON | IXOFF | IXANY);  /* no software flow control */
 	
 	t.c_oflag &= ~OPOST;  /* raw output */

@@ -49,77 +49,117 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/time.h>
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <fcntl.h>
+
+#ifndef __WIN32__
+
+#include <unistd.h>
 #include <termios.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <getopt.h>
+
+#else
+#include <process.h>  // under win instead of unistd.h
+                      // thanks to Tobias Muehlhuber for that tip :)
+#include <windows.h>
+#include <time.h>
+#include "getopt.h"
+
+#endif // __WIN32__
+
 #include <string.h>
 #include <assert.h>
 #include <ctype.h>
-#include <getopt.h>
+
+#include <cerrno>
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
 
 #include "ihexfile.h"
+#if defined(__cplusplus)
+}
+#endif
+
+#include "PHCC_Serial.h"
+#include <iostream>
+
+using namespace std;
+
 
 #define STX 0x0F
 #define ETX 0x04
 #define DLE 0x05
-#define CHK 0xff    /*placeholder*/
+#define CHK 0xff    //placeholder
 #define TICKLE 0xFF
 
+
+PHCC_Serial * port;
+
 int checksum = 0;
-/*int fd = 0;*/
-int speed=B19200;
-int flags=CS8;
+//int fd = 0;
 char dev[64];
 int bytes = -1;
 int startaddr = -1;
 char hexfile[64];
 int rows;
 
+
 void waitms(int ms)
 {
+#ifndef __WIN32__
 	struct timeval tv;
 	tv.tv_sec=0;
 	tv.tv_usec=ms*1000;
 	select(0, NULL, NULL, NULL, &tv);
+#else
+	Sleep(ms);
+#endif // __WIN32__
 }
 
 void flush()
 {
-	fflush(stdout);   /*flush stdout   // how do you flush an int fd ??? */
+	fflush(stdout);   //flush stdout   // how do you flush an int fd ???
 }
 
-int serialRead(int fd, unsigned char * _byte)
+int serialRead(unsigned char * _byte)
 {
     int size;
     flush();
-    size = read(fd, _byte, 1); /* returns 0 if fcntl(serialFD, F_SETFL, FNDELAY) set */
+	size = port->serialReadBlocking(_byte);
+	if( size == -1 )
+	{
+	   printf("\n\nError while reading from port: %s\n\n", strerror(errno));
+	   port->closeDevice();
+	   exit(-1);
+	}
     return size;
 }
 
-int serialReadPrint(int fd, unsigned char * _byte)
+int serialReadPrint(unsigned char * _byte)
 {
-	int size = serialRead(fd, _byte);
+	int size = serialRead(_byte);
 	printf("read from port: 0x%02hx\n", _byte[0]);
 	return size;
 }
 
-int serialReadEscape(int fd, unsigned char * _byte)
+int serialReadEscape(unsigned char * _byte)
 {
-	int size = serialRead(fd, _byte);
-	if( _byte[0] == DLE )
-		size = serialRead(fd, _byte);
-	return size;
+   int size = serialRead(_byte);
+   if( _byte[0] == DLE )
+	  size = serialRead(_byte);
+   return size;
 }
 
-int expectSTX(int fd)
+int expectSTX()
 {
 	unsigned char b;
-	serialRead(fd, &b);
+	int size = serialRead(&b);
 	if( b == STX )
 	{
 		printf("<STX>");
@@ -128,15 +168,16 @@ int expectSTX(int fd)
 	else
 	{
 		printf("\n[ERROR, expected STX, got 0x%02x]\n", b);
-		close(fd);
+		port->closeDevice();
 		exit(-1);
 	}
+	return size;
 }
 
-int expectETX(int fd)
+int expectETX()
 {
 	unsigned char b;
-	serialRead(fd, &b);
+	int size = serialRead(&b);
 	if( b == ETX )
 	{
 		printf("<ETX>\n");
@@ -145,27 +186,26 @@ int expectETX(int fd)
 	else
 	{
 		printf("\n[ERROR, expected ETX, got 0x%02x]\n", b);
-		close(fd);
+		port->closeDevice();
 		exit(-1);
 	}
-}
-
-unsigned char expectCHKSUM(int fd)
-{
-	unsigned char b;
-	int size;
-	printf("{CHKSUM");
-	size = serialReadEscape(fd, &b);
-	printf("<0x%02x>}", b);
 	return size;
 }
 
-unsigned char expectPacketType(int fd, unsigned char _byte)
+unsigned char expectCHKSUM()
 {
 	unsigned char b;
-	int size;
+	printf("{CHKSUM");
+	serialReadEscape(&b);
+	printf("<0x%02x>}", b);
+	return b;
+}
+
+unsigned char expectPacketType(unsigned char _byte)
+{
+	unsigned char b;
 	printf("{Packettype ");
-	size = serialReadEscape(fd, &b);
+	serialReadEscape(&b);
 	switch( b )
 	{
 		case 0x00:
@@ -199,78 +239,61 @@ unsigned char expectPacketType(int fd, unsigned char _byte)
 	if( b != _byte )
 	{
 		printf("\n[ERROR, expected PacketType 0x%02x, but got 0x%02x]\n", b, _byte);
-		close(fd);
+		port->closeDevice();
 		exit(-1);
 	}
-	return size;
+	return b;
 }
 
-void serialWrite(int fd, unsigned char _byte)
+void serialWrite(unsigned char _byte)
 {
-  unsigned char c[1];
-  c[0] = _byte;
-  write(fd, c, 1);
-/*  printf("wrote to port: 0x%02x\n", c[0]);*/
-  waitms(10);
-  return;
+   int size = port->serialWriteBlocking(_byte);
+   if( size == -1 )
+   {
+	  printf("\n\nError while reading from port: %s\n\n", strerror(errno));
+	  port->closeDevice();
+	  exit(-1);
+   }
+   waitms(10);
+   return;
 }
 
-void sendSTX(int fd)
+void sendSTX()
 {
 	printf("<STX>");
-	serialWrite(fd, STX);
+	serialWrite(STX);
 }
 
-void sendETX(int fd)
+void sendETX()
 {
-	serialWrite(fd, ETX);
+	serialWrite(ETX);
 	printf("<ETX>\n");
 }
 
-void sendescape(int fd, unsigned char _byte)
+void sendescape(unsigned char _byte)
 {
 	unsigned char c[1]; c[0] = _byte; 
 	if(  (_byte ^ STX)==0 || (_byte ^ ETX)==0 || (_byte ^ DLE)==0 )
 	{
-		serialWrite(fd, DLE);
+		serialWrite(DLE);
 		printf("<DLE>");
 	}
-	serialWrite(fd, _byte);
+	serialWrite(_byte);
 	printf("<0x%02x>", c[0]);
 }
 
-void senddata(int fd, unsigned char _byte)
+void senddata(unsigned char _byte)
 {
 	checksum += _byte;
-	sendescape(fd, _byte);
+	sendescape(_byte);
 }
 
-void sendchecksum(int fd)
+void sendchecksum()
 {
 	printf("{CHKSUM:");
 	checksum = (~(checksum & 0x00FF))+1;
-	sendescape(fd, checksum);
+	sendescape(checksum);
   	printf("}");
-}
-
-
-void setline(int fd, int flags, int speed)
-{
-	struct termios t;
-
-	tcgetattr(fd, &t);
-
-	t.c_cflag = flags | CREAD | HUPCL | CLOCAL;
-	t.c_iflag = IGNBRK | IGNPAR;
-	t.c_oflag = 0;
-	t.c_lflag = 0;
-	t.c_cc[VMIN ] = 1;
-	t.c_cc[VTIME] = 0;
-
-	cfsetispeed(&t, speed);
-	cfsetospeed(&t, speed);
-
-	tcsetattr(fd, TCSANOW, &t);
 }
 
 void usage(char * argv0)
@@ -307,22 +330,24 @@ void usage(char * argv0)
 }
 
 
-void main_readeeprom(int fd)
+void main_readeeprom()
 {
-	long int adr = 0;
+//	int i;
+	int adr = 0;
 	unsigned char b;
-	int maxsize = 256; /* bytes of EEPROM the device has */
+	int maxsize = 256; // bytes of EEPROM the device has
 
 	if( bytes <= 0 || startaddr < 0 )
 	{
 		printf("ERROR: you need to specify both --bytes and --startaddr\n");
+		port->closeDevice();
 		exit(-1);
 	}
 		
 	if( startaddr > maxsize-1 )
 	{
 		printf("[ERROR, address out of range. Device EEPROM address range is 0-%i]\n", maxsize-1);
-                close(fd);
+		port->closeDevice();
 		exit(-1);
 	}
 	if( bytes > maxsize )
@@ -331,39 +356,39 @@ void main_readeeprom(int fd)
 		bytes=maxsize-startaddr;
 	}
 	printf("SENDing: Read EEPROM: ");
-	sendSTX(fd); 
-	sendSTX(fd);
+	sendSTX(); 
+	sendSTX();
 	
-	senddata(fd, 0x04); /* type = 4 for read EEPROM data mem */
-	senddata(fd, bytes); /* size */
-	senddata(fd, startaddr & 0x00FF);  /* ADDRL */
-	senddata(fd, (startaddr >> 8 ) & 0x00FF);  /* ADDRH */
-	senddata(fd, 0x00); /* fill for upper */
+	senddata(0x04); // type = 4 for read EEPROM data mem
+	senddata(bytes); // size
+	senddata(startaddr & 0x00FF);  // ADDRL
+	senddata((startaddr >> 8 ) & 0x00FF);  // ADDRH
+	senddata(0x00); // fill for upper
 	
-	sendchecksum(fd);
-	sendETX(fd);  
+	sendchecksum();
+	sendETX();  
 
 	printf("RECEIVING: ");
-	expectSTX(fd);
-	expectSTX(fd);
-	expectPacketType(fd, 0x04);
-	serialReadEscape(fd, &b);
+	expectSTX();
+	expectSTX();
+	expectPacketType(0x04);
+	serialReadEscape(&b);
 	bytes = b;
 	printf("size = 0x%02hx\n", bytes);
 	printf("Data Dump: \n");
-	serialReadEscape(fd, &b); adr = b;
-	serialReadEscape(fd, &b); adr += (b << 8);
-	serialReadEscape(fd, &b); 
+	serialReadEscape(&b); adr = b;
+	serialReadEscape(&b); adr += (b << 8);
+	serialReadEscape(&b); 
 	while( adr - startaddr < bytes )
 	{
-	    serialReadEscape(fd, &b);
-	    printf("0x%06lx\t", adr);
+	    serialReadEscape(&b);
+	    printf("0x%06lx\t", (unsigned long int)adr);
 	    printf("%02hx\n", b);
-/*	    membuffer[adr] = b; */
+//	    membuffer[adr] = b;
 	    adr++;
 	}
-	expectCHKSUM(fd);
-	if( expectETX(fd) )
+	expectCHKSUM();
+	if( expectETX() )
 	{
 		printf("<ETX>\n");
 		printf("[OK => Read EEPROM Data Memory]\n");
@@ -371,14 +396,15 @@ void main_readeeprom(int fd)
 	else
 	{
 		printf("[ERROR: transmission incomplete]\n");
-		close(fd);
+		port->closeDevice();
 		exit(-1);
 	}
 }
 
-void writeflash(int fd, unsigned int * membuffer, int startaddress, int words)
+void writeflash(unsigned int * membuffer, int startaddress, int words)
 {
 	int i;
+//	unsigned char b;
 	if( words < 4 )
 	{
 		printf("[less than eight bytes for flash op, filling up with 0xFF]\n");
@@ -394,34 +420,34 @@ void writeflash(int fd, unsigned int * membuffer, int startaddress, int words)
 		words = words-(words%4)+4;
 	}
 	printf("SENDing: Write Flash: ");
-	sendSTX(fd); 
-	sendSTX(fd);
+	sendSTX(); 
+	sendSTX();
 	
-	senddata(fd, 0x02); /* type = 1 for read flash prog mem */
-	senddata(fd, words/4); /* size */
-	senddata(fd, startaddress & 0x0000FF);  /* TBLPTRL */
-	senddata(fd, (startaddress >> 8 ) & 0x0000FF);  /* TBLPTRH */
-	senddata(fd, (startaddress >> 16 ) & 0x0000FF); /* TBLPTRU */
+	senddata(0x02); // type = 1 for read flash prog mem
+	senddata(words/4); // size
+	senddata(startaddress & 0x0000FF);  // TBLPTRL
+	senddata((startaddress >> 8 ) & 0x0000FF);  // TBLPTRH
+	senddata((startaddress >> 16 ) & 0x0000FF); // TBLPTRU
 
 	for(i=0; i<words; i++)
 	{
-		senddata(fd, membuffer[i] & 0x0FF);
-		senddata(fd, membuffer[i] >> 8);
+		senddata(membuffer[i] & 0x0FF);
+		senddata(membuffer[i] >> 8);
 	}
 	
-	sendchecksum(fd);
-	sendETX(fd);  
-	/*//// send complete, wait for answer //////////////////////////////*/
+	sendchecksum();
+	sendETX();  
+	///// send complete, wait for answer ///////////////////////////////
 	printf("RECEIVING: "); 
-	expectSTX(fd);
-	expectSTX(fd);
-	expectPacketType(fd, 0x02);
-	expectCHKSUM(fd);
-	expectETX(fd);
+	expectSTX();
+	expectSTX();
+	expectPacketType(0x02);
+	expectCHKSUM();
+	expectETX();
 	printf("[OK => Acknowledged Write Flash Program Memory]\n");
 }
 
-void main_readflash(int fd)
+void main_readflash()
 {
 	unsigned char b;
 	long adr;
@@ -433,36 +459,37 @@ void main_readflash(int fd)
 	if( bytes <= 0 || startaddr < 0 )
 	{
 		printf("ERROR: you need to specify both --bytes and --startaddr\n");
+		port->closeDevice();
 		exit(-1);
 	}
 
 	printf("SENDing: Read Flash: ");
-	sendSTX(fd); 
-	sendSTX(fd);
+	sendSTX(); 
+	sendSTX();
 	
-	senddata(fd, 0x01); /* type = 1 for read flash prog mem */
-	senddata(fd, bytes); /* size */
-	senddata(fd, startaddr & 0x0000FF);  /* TBLPTRL */
-	senddata(fd, (startaddr >> 8 ) & 0x0000FF);  /* TBLPTRH */
-	senddata(fd, (startaddr >> 16 ) & 0x0000FF); /* TBLPTRU */
+	senddata(0x01); // type = 1 for read flash prog mem
+	senddata(bytes); // size
+	senddata(startaddr & 0x0000FF);  // TBLPTRL
+	senddata((startaddr >> 8 ) & 0x0000FF);  // TBLPTRH
+	senddata((startaddr >> 16 ) & 0x0000FF); // TBLPTRU
 	
-	sendchecksum(fd);
-	sendETX(fd);  
+	sendchecksum();
+	sendETX();  
 
 	printf("RECEIVING: ");
-	expectSTX(fd);
-	expectSTX(fd);
-	expectPacketType(fd, 0x01);
-	serialReadEscape(fd, &b);
+	expectSTX();
+	expectSTX();
+	expectPacketType(0x01);
+	serialReadEscape(&b);
 	bytes = b;
 	printf("size = 0x%02hx\n", bytes);
 	printf("Data Dump: \n");
-	serialReadEscape(fd, &b); adr = b;
-	serialReadEscape(fd, &b); adr += (b << 8);
-	serialReadEscape(fd, &b); adr += (b << 16); /*read TBLPTR[L,H,U] */
+	serialReadEscape(&b); adr = b;
+	serialReadEscape(&b); adr += (b << 8);
+	serialReadEscape(&b); adr += (b << 16); //read TBLPTR[L,H,U]
 	while( adr - startaddr < bytes )
 	{
-	    serialReadEscape(fd, &b);
+	    serialReadEscape(&b);
 	    printf("0x%06lx\t", adr);
 	    printf("%02hx\n", b);
 	    if( adr%2 == 0 )
@@ -471,8 +498,8 @@ void main_readflash(int fd)
 		    membuffer[adr/2] = membuffer[adr/2] | (b << 8) ;
 	    adr++;
 	}
-	expectCHKSUM(fd);
-	if( expectETX(fd) )
+	expectCHKSUM();
+	if( expectETX() )
 	{
 		int no_of_words = bytes/2;
 		FILE * f = fopen("out.hex", "wb");
@@ -486,87 +513,86 @@ void main_readflash(int fd)
 	else
 	{
 		printf("[ERROR: transmission incomplete]\n");
-		close(fd);
+		port->closeDevice();
 		exit(-1);
 	}
 }
 
-void eraseflash(int fd, long int startaddr, int rows)
+void eraseflash(long int startaddr, int rows)
 {
+//	unsigned char b;
 	printf("SENDing Erase Flash: ");
-	sendSTX(fd); 
-	sendSTX(fd);
+	sendSTX(); 
+	sendSTX();
 	
-	senddata(fd, 0x03); /* type = 3 for erase flash prog mem */
-	senddata(fd, rows); /* size */
-	senddata(fd, startaddr & 0x0000FF);  /* TBLPTRL */
-	senddata(fd, (startaddr >> 8 ) & 0x0000FF);  /* TBLPTRH */
-	senddata(fd, (startaddr >> 16 ) & 0x0000FF); /* TBLPTRU */
+	senddata(0x03); // type = 3 for erase flash prog mem
+	senddata(rows); // size
+	senddata(startaddr & 0x0000FF);  // TBLPTRL
+	senddata((startaddr >> 8 ) & 0x0000FF);  // TBLPTRH
+	senddata((startaddr >> 16 ) & 0x0000FF); // TBLPTRU
 	
-	sendchecksum(fd);
-	sendETX(fd);  
+	sendchecksum();
+	sendETX();  
 
 	printf("RECEIVING: ");
-	expectSTX(fd);
-	expectSTX(fd);
-	expectPacketType(fd, 0x03);
-	expectCHKSUM(fd);
-	if( ! expectETX(fd) )
+	expectSTX();
+	expectSTX();
+	expectPacketType(0x03);
+	expectCHKSUM();
+	if( ! expectETX() )
 	{
 		printf("[ERROR: ACK for erase flash incomplete]\n");
-		close(fd);
+		port->closeDevice();
 		exit(-1);
 	}
 	printf("[OK => Erase Flash Program Memory]\n");
 }
 
-void main_eraseflash(int fd)
+void main_eraseflash()
 {
 	
 	if( rows <= 0 || startaddr < 0 )
 	{
 		printf("ERROR: you need to specify both --rows and --startaddr\n");
+		port->closeDevice();
 		exit(-1);
 	}
 
-	eraseflash(fd, startaddr, rows);
+	eraseflash(startaddr, rows);
 }
 
-void main_writeflash(int fd)
+void main_writeflash()
 {
-    int ret=OK;
+//   int i;
+   int ret=OK;
 	FILE * f;
 	int words = 0;
 	int xbytes;
 	int xstartaddr = 0;
-#define MEMBUFSIZE 10
-	unsigned int membuffer[MEMBUFSIZE];
-	int i;
-	
-	for(i=0; i<MEMBUFSIZE; ++i)
-		membuffer[i]=0xFFFFFFFF;
-#undef MEMBUFSIZE
+	unsigned int membuffer[10];
+
 	if( strlen(hexfile) < 1 )
 	{
 		printf("ERROR: you need to specify --hexfile <filename>\n");
+		port->closeDevice();
 		exit(-1);
 	}
 
 	if( (f = fopen(hexfile, "r") )==NULL )
 	{
 		printf("Error: could not open hexfile '%s'\n", hexfile);
-		close(fd);
+		port->closeDevice();
 		exit(-2);
 	}
 
 	do {
 		ret = readihexline(f, membuffer, &xstartaddr, &words);
-		xstartaddr = xstartaddr * 2; /* we need the byte counted addr not word counted */
+		xstartaddr = xstartaddr * 2; // we need the byte counted addr not word counted
 		xbytes = words *2;
 		switch(ret)
 		{
 			case OK: printf("line read from hexfile had startaddress=0x%04X with length %ibytes\n", xstartaddr, xbytes);
-			   writeflash(fd, membuffer, xstartaddr, words);
+			   writeflash(membuffer, xstartaddr, words);
 			   break;
 			case ENDOFFILE: break;
 			case JUNK: printf("[found junk in hexfile]\n");
@@ -575,15 +601,15 @@ void main_writeflash(int fd)
 	} while(ret != ENDOFFILE );
 }
 
-void reset_pic(int fd)
+void reset_pic()
 {
 	printf("SENDing RESET: ");
-        sendSTX(fd);
-        sendSTX(fd);
-        senddata(fd, 0x00); /* type does not matter for reset */
-        senddata(fd, 0x00); /* size has to be zero (this is the distinguishing feature of a reset packet) */
-        sendchecksum(fd);
-        sendETX(fd);
+        sendSTX();
+        sendSTX();
+        senddata(0x00); // type does not matter for reset
+        senddata(0x00); // size has to be zero (this is the distinguishing feature of a reset packet)
+        sendchecksum();
+        sendETX();
 	/* nothing more to do, device should reset without an answer */
 	printf("[OK => RESET Device]\n");
 }
@@ -592,8 +618,8 @@ void reset_pic(int fd)
 int number_arg(char * str) /* converts a string into a number, checks if decimal or hex, returns -1 if error */
 {
 	char * hex_prefix = "0x";
-	char prfx[3] = "\0\0\0";
-	int value = -1;
+	char prfx[4] = "\0\0\0";
+	unsigned int value = 0xFFFFFFFF;
 	if( strlen(str) > 63 )
 	{
 		printf("ERROR: option too long\n");
@@ -604,8 +630,8 @@ int number_arg(char * str) /* converts a string into a number, checks if decimal
 		strncpy(prfx, str, 2);
 		if( strcmp(hex_prefix, prfx) == 0 ) /* hex number */
 		{
-			if( sscanf(str, "0x%x", &value )==0 )
-				value = -1;
+			if( sscanf(str, "0x%x", &value)==0 )
+				value = 0xFFFFFFFF;
 			return value;
 		}
 	}
@@ -651,12 +677,14 @@ static struct option long_options[] =
 int main(int argc, char **argv)
 {
 	int c;
-	int fd=-1;
 
-	strcpy(dev, "/dev/ttyS0"); /* default device */
 	strcpy(hexfile, "\0\0\0");  /* set to zero */
+#ifndef __WIN32__
 	fcntl(1, F_SETFL, O_SYNC);
-
+	strcpy(dev, "/dev/ttyS0"); /* default device */
+#else
+	strcpy(dev, "COM1"); /* default device */
+#endif // __WIN32__
 	while (1)
 	{
 		/* `getopt_long' stores the option index here. */
@@ -743,14 +771,28 @@ int main(int argc, char **argv)
 				abort ();
 		}
 	}
-  
-	if( (fd = open(dev, O_RDWR | O_NOCTTY)) <= 0 )
+ 
+	
+	port = new PHCC_Serial(&cout); // uses std::cout
+	port->openDevice(dev, 19200, false);
+	if( ! port->isOpen() )
 	{
-		printf("ERROR: could not open serial device '%s'\n", dev);
-		exit(-1);
+	   printf("ERROR: could not open serial device '%s'\n", dev);
+	   exit(-1);
 	}
-	setline(fd, flags, speed);
-	serialWrite(fd, TICKLE); /* send tickle byte */
+	
+	port->serialWriteBlocking(TICKLE); // send tickle byte
+	waitms(250);
+	port->serialWriteBlocking(TICKLE); // send tickle byte
+	port->serialWriteBlocking(TICKLE); // send tickle byte
+	unsigned char readjunk;
+	// make sure buffers are flushed and the 'alive' messages of the bootloader don't interfere with our communication
+	for( int i=0; i<16; i++)
+	{
+		port->serialRead(&readjunk);  // non-blocking !!! 	
+		waitms(10);
+		
+	}
 
 	/* Print any remaining command line arguments (not options). */
 	if (optind < argc)
@@ -761,38 +803,37 @@ int main(int argc, char **argv)
 		putchar ('\n');
 		usage(argv[0]);
 	}
-
 	switch(action)
 	{ 
 		case WR_FLASH:
 			printf("action: write flash\n");
-			main_writeflash(fd);
+			main_writeflash();
 			break;
 		case RD_FLASH:
 			printf("action: read flash\n");
-			main_readflash(fd);
+			main_readflash();
 			break;
 		case ER_FLASH:
 			printf("action: erase flash\n");
-			main_eraseflash(fd);
+			main_eraseflash();
 			break;
 		case WR_EEPROM:
 			printf("action: write eeprom\n");
-/*			main_writeeeprom(fd); */
+/*			main_writeeeprom(); */
 			printf("\n\tNOT IMPLEMETED YET\n\n");
 			break;
 		case RD_EEPROM:
 			printf("action: read eeprom\n");
-			main_readeeprom(fd);
+			main_readeeprom();
 			break;
 		case ER_EEPROM:
 			printf("action: erase eeprom\n");
-/*			main_eraseeeprom(fd); */
+/*			main_eraseeeprom(); */
 			printf("\n\tNOT IMPLEMETED YET\n\n");
 			break;
 		case RESET:
 			printf("resetting PIC\n");
-			reset_pic(fd);
+			reset_pic();
 			break;
 		default:
 			printf("You need to specify the action to take\n");
@@ -800,7 +841,7 @@ int main(int argc, char **argv)
 	}
    
 
-	close(fd);
+	port->closeDevice();
 
 	return 0;
 }
