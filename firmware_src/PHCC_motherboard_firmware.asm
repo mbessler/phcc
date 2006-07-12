@@ -57,7 +57,7 @@
 
 #define MAJOR_VERSION 0
 #define MINOR_VERSION 1
-#define MICRO_VERSION 7
+#define MICRO_VERSION 8
 
 
 #define FREQTIMESFOUR 10    ;; for delays, specifies the multiple of 4 MHz we're running at.
@@ -364,57 +364,9 @@ main:
 		CALL	keymatrix_in
 		
 		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
 		CALL			yield
 		CALL	analog_GO		; for secA
 		CALL			start_conv_timer
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
 		CALL	keymatrix_in
 		
 		CALL	inc_154
@@ -439,33 +391,9 @@ main:
 		CALL	analog_DONE		; for secA
 		
 		CALL	inc_154
-		CALL	inc_adr4067
+;;;		CALL	inc_adr4067
 		CALL	read_analog_secB
 		CALL			start_acq_timer
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
 		CALL	keymatrix_in
 		
 		CALL	inc_154
@@ -490,30 +418,6 @@ main:
 		CALL			yield
 		CALL	analog_GO		; for secB
 		CALL			start_conv_timer
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
-		CALL	keymatrix_in
-		
-		CALL	inc_154
-		NOP
-		NOP
-		NOP
 		CALL	keymatrix_in
 		
 		CALL	inc_154
@@ -986,10 +890,6 @@ matrixmap_next:
 		DECFSZ	counterkmx2, F		; are we done with all bytes ?
 		BRA		matrixmap_next		; no, send next
 			; send term sequence to host
-
-		;; 				BSF		INTCON, GIE
-
-		
 		MOVLW	b'11111111'			; 'all-bits-one-byte'
 		RCALL	rs232_send			; send to host
 		MOVLW	b'00000000'			; 'all-bits-zero-byte'
