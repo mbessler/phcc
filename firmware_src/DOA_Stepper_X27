@@ -1,0 +1,687 @@
+//******************************************************************************
+//   DOA_Stepper_X27.C
+//
+// part of the PHCC (PIC HomeCockpit Controller) Project
+//
+// This is the 4x Stepper motor controller that consists
+// of a PIC, 4 stepper motors and 4 L293D drivers.
+//
+// Copyright (c) 2016 by José Saraiva <jsaraiva AT jetmaint.com>
+//
+//  The full text of the legal notices is contained in the file called
+//  COPYING, included with this distribution.
+//
+//  This program is free software; you can redistribute it and/or
+//  modify it under the terms of the GNU General Public License
+//  as published by the Free Software Foundation; either version 3
+//  of the License, or (at your option) any later version.
+//
+//  This program is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with this program; if not, write to the Free Software
+//  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.                                                                          *
+//
+//******************************************************************************
+
+#define DOA_CLK PORTB.f0
+#define DOA_DATA PORTB.f1
+#define DOA_CLK_TRIS TRISB, 0
+#define DOA_DATA_TRIS TRISB, 1
+
+#define STATE_ADDR 0x0
+#define STATE_SUBADDR 0x1
+#define STATE_DATA 0x2
+
+#define MOTOR1A                PORTA.f1
+#define MOTOR1B                PORTA.f0
+#define MOTOR1C                PORTA.f4
+#define MOTOR1D                PORTA.f3
+#define MOTOR1EN        PORTA.f2
+
+#define MOTOR2A                PORTC.f0
+#define MOTOR2B                PORTA.f5
+#define MOTOR2C                PORTC.f3
+#define MOTOR2D                PORTC.f2
+#define MOTOR2EN        PORTC.f1
+
+#define MOTOR3A                PORTC.f5
+#define MOTOR3B                PORTC.f4
+#define MOTOR3C                PORTB.f2
+#define MOTOR3D                PORTC.f7
+#define MOTOR3EN        PORTC.f6
+
+#define MOTOR4A                PORTB.f4
+#define MOTOR4B                PORTB.f3
+#define MOTOR4C                PORTB.f6
+#define MOTOR4D                PORTB.f7
+#define MOTOR4EN        PORTB.f5
+
+
+#define DEVADDR 0x70
+
+
+unsigned short DOA_state, DOA_addr, DOA_subaddr, DOA_data;
+unsigned int stepper[4];
+unsigned short step[4];
+
+unsigned int i;
+unsigned short bitcounter;
+
+unsigned int product;
+unsigned  int currentPos[4];
+unsigned  short int direction[4];
+unsigned  int speed[4];
+unsigned  int maxspeed;
+unsigned int minspeed;
+unsigned  int delta[4];
+
+unsigned int lastspeed[4]  ;
+
+unsigned int steps[4] ;
+
+
+unsigned int start[4];
+
+unsigned int stop[4];
+unsigned int divisor;
+
+
+
+unsigned  int passcount;
+unsigned  int counter1;
+
+
+
+
+
+void setupDOA();
+void DOAInt();
+void DOARecv();
+
+
+
+void interrupt()
+{
+   if (INTCON.INT0IF)
+      DOAInt();
+}
+
+void initialize()
+{
+   PORTA = 0x0;
+   PORTB = 0x0;
+   PORTC = 0x0;
+
+   TRISA = 0x0;
+   TRISB = 0x3;
+   TRISC = 0x0;
+
+   ADCON1 = 0x7;
+
+   setupDOA();
+
+   stepper[0] = 0;
+   stepper[1] = 0;
+   stepper[2] = 0;
+   stepper[3] = 0;
+   
+   currentPos[0]= 1000;
+   currentPos[1]= 1000;
+   currentPos[2]= 1000;
+   currentPos[3]= 1000;
+   
+   speed[0] = 500;
+   speed[1] = 500;
+   speed[2] = 500;
+   speed[3] = 500;
+      
+
+   maxspeed = 600;
+   minspeed = 60;
+   
+   delta[0] = 0;
+   delta[1] = 0;
+   delta[2] = 0;
+   delta[3] = 0;
+
+   
+   direction[0] = 1;
+   direction[1] = 1;
+   direction[2] = 1;
+   direction[3] = 1;
+
+   
+
+   
+   lastspeed[0] = 500;
+   lastspeed[1] = 500;
+   lastspeed[2] = 500;
+   lastspeed[3] = 500;
+   
+   steps[0] = 0;
+   steps[1] = 0;
+   steps[2] = 0;
+   steps[3] = 0;
+   
+
+
+
+   
+   passcount = 0;
+
+   RCON.IPEN = 0;
+   INTCON.GIE = 1;
+   INTCON.PEIE = 1;
+
+}
+
+  void StepBit(int motor, int step)
+  {
+    switch(motor)
+
+    {
+    case 0 :
+      switch(step)
+      {
+      case 0:
+        MOTOR1EN = 0;
+        MOTOR1A =  1;
+        MOTOR1B =  0;
+        MOTOR1C =  0;
+        MOTOR1D =  1;
+        MOTOR1EN = 1;
+        break;
+
+      case 1:
+        MOTOR1EN = 0;
+        MOTOR1A =  1;
+        MOTOR1B =  0;
+        MOTOR1C =  0;
+        MOTOR1D =  0;
+        MOTOR1EN = 1;
+        break;
+
+      case 2:
+        MOTOR1EN = 0;
+        MOTOR1A =  0;
+        MOTOR1B =  0;
+        MOTOR1C =  1;
+        MOTOR1D =  0;
+        MOTOR1EN = 1;
+        break;
+
+      case 3:
+        MOTOR1EN = 0;
+        MOTOR1A =  0;
+        MOTOR1B =  1;
+        MOTOR1C =  1;
+        MOTOR1D =  0;
+        MOTOR1EN = 1;
+        break;
+
+      case 4:
+        MOTOR1EN = 0;
+        MOTOR1A =  0;
+        MOTOR1B =  1;
+        MOTOR1C =  0;
+        MOTOR1D =  0;
+        MOTOR1EN = 1;
+        break;
+
+      case 5:
+        MOTOR1EN = 0;
+        MOTOR1A =  0;
+        MOTOR1B =  0;
+        MOTOR1C =  0;
+        MOTOR1D =  1;
+        MOTOR1EN = 1;
+        break;
+      }
+      break;
+
+    case 1 :
+      switch(step)
+      {
+      case 0:
+        MOTOR2EN = 0;
+        MOTOR2A =  1;
+        MOTOR2B =  0;
+        MOTOR2C =  0;
+        MOTOR2D =  1;
+        MOTOR2EN = 1;
+        break;
+
+
+      case 1:
+        MOTOR2EN = 0;
+        MOTOR2A =  1;
+        MOTOR2B =  0;
+        MOTOR2C =  0;
+        MOTOR2D =  0;
+        MOTOR2EN = 1;
+        break;
+
+      case 2:
+        MOTOR2EN = 0;
+        MOTOR2A =  0;
+        MOTOR2B =  0;
+        MOTOR2C =  1;
+        MOTOR2D =  0;
+        MOTOR2EN = 1;
+        break;
+
+      case 3:
+        MOTOR2EN = 0;
+        MOTOR2A =  0;
+        MOTOR2B =  1;
+        MOTOR2C =  1;
+        MOTOR2D =  0;
+        MOTOR2EN = 1;
+        break;
+
+      case 4:
+        MOTOR2EN = 0;
+        MOTOR2A =  0;
+        MOTOR2B =  1;
+        MOTOR2C =  0;
+        MOTOR2D =  0;
+        MOTOR2EN = 1;
+        break;
+
+      case 5:
+        MOTOR2EN = 0;
+        MOTOR2A =  0;
+        MOTOR2B =  0;
+        MOTOR2C =  0;
+        MOTOR2D =  1;
+        MOTOR2EN = 1;
+        break;
+      }
+      break;
+
+    case 2 :
+      switch(step)
+      {
+      case 0:
+        MOTOR3EN = 0;
+        MOTOR3A =  1;
+        MOTOR3B =  0;
+        MOTOR3C =  0;
+        MOTOR3D =  1;
+        MOTOR3EN = 1;
+        break;
+
+      case 1:
+        MOTOR3EN = 0;
+        MOTOR3A =  1;
+        MOTOR3B =  0;
+        MOTOR3C =  0;
+        MOTOR3D =  0;
+        MOTOR3EN = 1;
+        break;
+
+      case 2:
+        MOTOR3EN = 0;
+        MOTOR3A =  0;
+        MOTOR3B =  0;
+        MOTOR3C =  1;
+        MOTOR3D =  0;
+        MOTOR3EN = 1;
+        break;
+
+      case 3:
+        MOTOR3EN = 0;
+        MOTOR3A =  0;
+        MOTOR3B =  1;
+        MOTOR3C =  1;
+        MOTOR3D =  0;
+        MOTOR3EN = 1;
+        break;
+
+      case 4:
+        MOTOR3EN = 0;
+        MOTOR3A =  0;
+        MOTOR3B =  1;
+        MOTOR3C =  0;
+        MOTOR3D =  0;
+        MOTOR3EN = 1;
+        break;
+
+      case 5:
+        MOTOR3EN = 0;
+        MOTOR3A =  0;
+        MOTOR3B =  0;
+        MOTOR3C =  0;
+        MOTOR3D =  1;
+        MOTOR3EN = 1;
+        break;
+      }
+      break;
+}
+}
+
+
+void setupDOA()
+{
+    INTCON2.INTEDG0 = 1;
+    INTCON.INT0IF = 0;
+    INTCON.INT0IE = 1;
+
+    DOA_state = 0;
+    DOA_addr = 0;
+    DOA_subaddr = 0;
+    DOA_data = 0;
+    bitcounter = 7;
+}
+
+void DOAInt()
+{
+    DOARecv();
+    INTCON.INT0IF = 0;         
+    INTCON.INT0IE = 1;
+}
+
+  void resolver (int z)
+{
+
+
+
+
+    if( direction[z] == 1)
+    {
+    delta[z] = (stepper[z] - currentPos[z]);
+
+
+    }
+    if (direction[z] == 0)
+    {
+       delta[z] = (currentpos[z] - stepper[z]);
+    }
+
+
+ }
+
+void DoaRecv()
+{
+    switch (DOA_state)
+    {
+       case 0:
+          if (DOA_DATA)
+             DOA_addr += 128;
+          if (bitcounter-- != 0)
+             DOA_addr = DOA_addr >> 1;
+          else
+          {
+             DOA_state = 1;
+             bitcounter = 5;
+          }
+          break;
+       case 1:
+          if (DOA_DATA)
+             DOA_subaddr += 128;
+          if (bitcounter-- != 0)
+             DOA_subaddr = DOA_subaddr >> 1;
+          else
+          {
+             DOA_state = 2;
+             DOA_subaddr = DOA_subaddr>> 2;
+             bitcounter = 7;
+          }
+          break;
+       case 2:
+          if (DOA_DATA)
+             DOA_data += 128;
+          if (bitcounter-- != 0)
+             DOA_data = DOA_data >> 1;
+          else
+          {
+             DOA_state = 0;
+             bitcounter = 7;
+
+             if (DOA_addr == DEVADDR)
+             {
+                if (DOA_subaddr >= 0 && DOA_subaddr <= 3)
+                {
+
+                  
+                     if ((DOA_data & 0x80) == 0x80)
+                     {
+                     stepper[DOA_subaddr] -= (DOA_data & 0x7F);
+                      direction[DOA_subaddr] = 0;
+                     }
+                    else
+                    {
+                     stepper[DOA_subaddr] += DOA_data;
+                        direction[DOA_subaddr] = 1 ;
+                     }
+                     if(stepper[DOA_subaddr] > 1000 && (DOA_data & 0x80) == 0x80 )
+                         stepper[DOA_subaddr] = 0;
+                         
+                     if(stepper[DOA_subaddr] > 944 && (DOA_data & 0x80) == 0x0 )
+                     {
+                         stepper[DOA_subaddr] = 945;
+                     }
+                     
+                     
+                      resolver(DOA_subaddr);
+
+                      divisor = delta[DOA_subaddr] / 4;
+                      
+                      start[DOA_subaddr] = divisor;
+                      if(stepper[DOA_subaddr] != currentPos[DOA_subaddr])
+                      {
+                        start[DOA_subaddr] = 0;
+                      }
+                      
+
+                      stop[DOA_subaddr] = divisor;
+
+                      counter1 = 0;
+
+                      steps[DOA_subaddr] = 0;
+                }
+                 else if(DOA_subaddr == 0x9)
+                 {
+                       {asm CLRF PCLATH ;
+                       asm GOTO 0x00;}
+
+
+
+                 }
+            }
+
+             DOA_addr = 0;
+             DOA_subaddr = 0;
+             DOA_data = 0;
+
+             break;
+          }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+ void setting(int z)
+ {
+ if (speed[z] == 0)
+ {
+
+
+
+
+
+     if (start[z] > 0 )
+     {
+        if (start[z] > 31)
+        start[z]= 31;
+        
+      speed[z] = lastspeed[z] - 50 ;
+      lastspeed[z] = speed[z];
+      start[z]--;
+     }
+
+    else
+    {
+
+     if (stop[z]> 0 )
+     {
+     
+      if(stop[z]> 31)
+      stop[z] = 31;
+      
+       if(delta[z] == speed[z])
+       {
+        speed[z] = lastspeed[z] + 80 ;
+        lastspeed[z] = speed[z];
+        stop[z]--;
+      }
+     }
+
+    }
+
+    if (speed[z] > maxspeed || (speed[z] < 10000 && speed[z] > maxspeed))
+   {
+    speed[z] = maxspeed;
+    lastspeed[z] = maxspeed;
+   }
+
+   if (speed[z] < minspeed || speed[z] > 10000)
+   {
+    speed[z] = minspeed;
+    lastspeed[z] = minspeed;
+   }
+
+
+
+
+  }
+  
+
+ }
+
+
+
+
+
+ 
+    void counterf(int z )
+   {
+
+
+   
+          speed[z]= speed[z] - 4;
+          if (speed[z] > 8000 )
+          {speed[z] = 0;}
+
+   }
+
+void main()
+{
+    initialize();
+
+   while(1)
+   {
+
+      for (i = 0; i < 4; i++)                       
+      {
+
+
+         if (stepper[i] != currentPos[i])               
+         {
+
+
+
+
+            if (speed[i] == 0)
+           {
+
+             if ( currentPos[i] < stepper[i] )       
+               {
+
+                    direction[i] = 1;
+                    currentPos[i]++;
+                    step[i]--;
+                    delta[z]--;
+                    steps[i]++;
+                    if (step[i] > 0x5)
+                    {
+                     step[i] = 0x5;
+                    }
+
+
+                     StepBit(i, step[i]);
+
+                }
+
+             if ( currentPos[i] > stepper[i] )                                 
+             {
+
+                    direction[i] = 0;
+                    currentPos[i]--;
+                    step[i]++;
+                    steps[i]++;
+                    delta[z]--;
+                    if (step[i] > 0x5)
+                    {
+                     step[i] = 0x0;
+                    }
+
+
+                     StepBit(i, step[i]);
+
+
+
+
+             }
+             
+
+
+           }
+
+
+
+            setting(i);
+
+
+          }
+          
+          
+          else
+          {
+          if(stepper[i] == currentPos[i] )
+          {
+            if (speed[i] == 0)
+            {
+              speed[i] = 300;
+             }
+          
+          }
+          }
+          
+          
+
+
+
+       if (speed[i] != 0)
+       {
+       counterf(i);
+
+       }
+       
+
+      }
+
+                   
+   }
+}
